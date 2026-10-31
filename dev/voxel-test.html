@@ -1,0 +1,23 @@
+<!doctype html>
+<html><body style="margin:0;background:#f7f7f7"><script type="module">
+import * as THREE from 'three';
+import { parseBitmap, extrudeBitmap, pillowZRange, buildVoxelGeometry } from '/src/render/voxel.ts';
+const bmp = parseBitmap([
+  '..####..',
+  '.######.',
+  '##o##o##',
+  '########',
+  '#.####.#',
+  '#......#',
+], { '#': 1, o: 2 });
+const grid = extrudeBitmap(bmp, 6, pillowZRange(6, 2, 2));
+const geo = buildVoxelGeometry(grid);
+const mats = [new THREE.MeshLambertMaterial({ color: '#535353', vertexColors: true }), new THREE.MeshLambertMaterial({ color: '#f7f7f7', vertexColors: true })];
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setSize(innerWidth, innerHeight); document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#f7f7f7');
+scene.add(new THREE.HemisphereLight('#ffffff', '#888888', 1.6)); const d = new THREE.DirectionalLight('#fff', 1.6); d.position.set(3, 6, 8); scene.add(d);
+const m = new THREE.Mesh(geo, mats); m.position.set(-4, -3, 0); m.rotation.y = -0.6; scene.add(m);
+const cam = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100); cam.position.set(0, 3, 16); cam.lookAt(0, 0, 0);
+r.render(scene, cam);
+window.__info = { verts: geo.attributes.position.count, groups: geo.groups, voxels: grid.count(), gl: r.getContext().getParameter(r.getContext().VERSION) };
+</script></body></html>

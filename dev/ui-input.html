@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Input / SFX check</title>
+  </head>
+  <body style="margin: 0; font: 14px monospace; background: #f7f7f7; color: #535353">
+    <button data-ui id="ui-btn" style="position: fixed; top: 8px; left: 8px">ui button</button>
+    <pre id="out" style="margin: 48px 8px"></pre>
+    <!-- node scripts/shot.mjs http://localhost:5184/dev/ui-input.html /tmp/x.png --eval "return window.__runTests()" -->
+    <script type="module">
+      import { createInput } from '/src/input/input.ts';
+      import { createSfx, scheduleSfx } from '/src/audio/sfx.ts';
+
+      const results = [];
+      const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail });
+      const key = (type, code, extra = {}) =>
+        window.dispatchEvent(new KeyboardEvent(type, { code, key: extra.key ?? code, repeat: !!extra.repeat, bubbles: true, cancelable: true }));
+      const ptr = (type, id, x, y, kind = 'touch', target = document.body) =>
+        target.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: kind, clientX: x, clientY: y, button: 0, bubbles: true }));
+      const copy = (f) => ({ ...f });
+
+      function inputTests() {
+        const input = createInput();
+        const actions = [];
+        input.onAction((a) => actions.push(a));
+        const s0 = copy(input.sample());
+        check('idle sample is all false', !s0.jumpPressed && !s0.jumpHeld && !s0.duckHeld && !s0.restartPressed, JSON.stringify(s0));
+
+        key('keydown', 'Space', { key: ' ' });
+        const a = copy(input.sample());
+        const b = copy(input.sample());
+        check('Space: edge once, then held', a.jumpPressed && a.jumpHeld && !b.jumpPressed && b.jumpHeld, JSON.stringify([a, b]));
+        key('keydown', 'Space', { key: ' ', repeat: true });
+        check('auto-repeat is not a new edge', !input.sample().jumpPressed);
+        key('keyup', 'Space', { key: ' ' });
+        check('release clears held', !input.sample().jumpHeld);
+
+        key('keydown', 'ArrowUp');
+        key('keyup', 'ArrowUp');
+        const c = copy(input.sample());
+        check('press+release between samples: pressed, not held', c.jumpPressed && !c.jumpHeld, JSON.stringify(c));
+        check('...and reported only once', !input.sample().jumpPressed);
+
+        key('keydown', 'KeyW');
+        check('no samples ran: press survives', input.sample().jumpPressed);
+        key('keyup', 'KeyW');
+
+        key('keydown', 'ArrowDown');
+        check('ArrowDown holds duck', input.sample().duckHeld && input.sample().duckHeld);
+        key('keyup', 'ArrowDown');
+        check('duck released', !input.sample().duckHeld);
+        key('keydown', 'KeyS');
+        key('keyup', 'KeyS');
+        check('quick duck tap reaches one sample', input.sample().duckHeld && !input.sample().duckHeld);
+
+        key('keydown', 'Enter');
+        const r = copy(input.sample());
+        check('Enter restarts (edge)', r.restartPressed && !r.jumpPressed && !input.sample().restartPressed);
+        key('keyup', 'Enter');
+
+        const ev = new KeyboardEvent('keydown', { code: 'Space', key: ' ', cancelable: true });
+        window.dispatchEvent(ev);
+        check('Space default prevented (no scroll)', ev.defaultPrevented);
+        key('keyup', 'Space', { key: ' ' });
+        input.sample();
+
+        key('keydown', 'KeyC', { key: 'c' });
+        key('keydown', 'KeyM', { key: 'm' });
+        key('keydown', 'KeyP', { key: 'p' });
+        key('keydown', 'Escape', { key: 'Escape' });
+        key('keydown', 'Backquote', { key: '`' });
+        key('keydown', 'KeyC', { key: 'c', repeat: true });
+        check('UI actions', JSON.stringify(actions) === JSON.stringify(['toggleCamera', 'toggleMute', 'togglePause', 'togglePause', 'toggleDebug']), JSON.stringify(actions));
+        const ctrl = new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', ctrlKey: true, cancelable: true });
+        window.dispatchEvent(ctrl);
+        check('Ctrl+C left to the browser', actions.length === 5 && !ctrl.defaultPrevented);
+
+        key('keydown', 'Space', { key: ' ' });
+        key('keydown', 'ArrowDown');
+        window.dispatchEvent(new Event('blur'));
+        const bl = copy(input.sample());
+        check('blur releases held keys', !bl.jumpHeld && !bl.duckHeld, JSON.stringify(bl));
+
+        // Pointer / touch.
+        ptr('pointerdown', 1, 100, 300);
+        const p1 = copy(input.sample());
+        check('tap: jump + restart edges, held', p1.jumpPressed && p1.restartPressed && p1.jumpHeld, JSON.stringify(p1));
+        check('touch flag set by touch pointer', input.touch === true);
+        ptr('pointermove', 1, 100, 320);
+        check('small move keeps jump', input.sample().jumpHeld);
+        ptr('pointermove', 1, 104, 345);
+        const p2 = copy(input.sample());
+        check('swipe down > 30px switches to duck', p2.duckHeld && !p2.jumpHeld, JSON.stringify(p2));
+        ptr('pointerup', 1, 104, 345);
+        const p3 = copy(input.sample());
+        check('touch end releases duck', !p3.duckHeld && !p3.jumpHeld, JSON.stringify(p3));
+
+        ptr('pointerdown', 2, 10, 10, 'touch', document.getElementById('ui-btn'));
+        const p4 = copy(input.sample());
+        check('[data-ui] presses ignored', !p4.jumpPressed && !p4.jumpHeld);
+        ptr('pointerup', 2, 10, 10, 'touch', document.getElementById('ui-btn'));
+
+        ptr('pointerdown', 3, 50, 50, 'mouse');
+        check('mouse click jumps, touch flag false', input.sample().jumpPressed && input.touch === false);
+        ptr('pointercancel', 3, 50, 50, 'mouse');
+        check('pointercancel releases', !input.sample().jumpHeld);
+
+        input.dispose();
+        key('keydown', 'Space', { key: ' ' });
+        check('dispose removes listeners', !input.sample().jumpPressed);
+      }
+
+      async function sfxTests() {
+        const sfx = createSfx();
+        localStorage.removeItem('dino3d.muted');
+        sfx.setMuted(true);
+        check('mute persisted', localStorage.getItem('dino3d.muted') === '1' && sfx.muted);
+        sfx.setMuted(false);
+        let threw = false;
+        try {
+          sfx.play('jump');
+          sfx.unlock();
+          sfx.play('crash');
+        } catch {
+          threw = true;
+        }
+        check('play/unlock never throw', !threw);
+        for (const name of ['jump', 'milestone', 'crash']) {
+          const rate = 44100;
+          const ctx = new OfflineAudioContext(1, rate * 0.5, rate);
+          const master = ctx.createGain();
+          master.gain.value = 0.25;
+          master.connect(ctx.destination);
+          scheduleSfx(ctx, master, name, 0.01);
+          const data = (await ctx.startRendering()).getChannelData(0);
+          let peak = 0;
+          let first = -1;
+          let lastI = -1;
+          for (let i = 0; i < data.length; i++) {
+            const v = Math.abs(data[i]);
+            peak = Math.max(peak, v);
+            if (v > 0.001) {
+              if (first < 0) first = i;
+              lastI = i;
+            }
+          }
+          // Largest sample-to-sample jump in the first / last 2 ms: a click would be a big step.
+          const edge = (from) => {
+            let m = 0;
+            for (let i = Math.floor(from); i < from + rate * 0.002; i++) m = Math.max(m, Math.abs(data[i + 1] - data[i]));
+            return m;
+          };
+          const dur = ((lastI - first) / rate) * 1000;
+          check(`sfx ${name}: audible, short, quiet, click-free`, peak > 0.03 && peak < 0.3 && dur < 300 && edge(first) < 0.05 && edge(lastI - rate * 0.002) < 0.05,
+            `peak ${peak.toFixed(3)} dur ${dur.toFixed(0)}ms startStep ${edge(first).toFixed(4)} endStep ${edge(lastI - rate * 0.002).toFixed(4)}`);
+        }
+      }
+
+      window.__runTests = async () => {
+        results.length = 0;
+        inputTests();
+        await sfxTests();
+        const failed = results.filter((r) => !r.ok);
+        document.getElementById('out').textContent = results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}  ${r.detail}`).join('\n');
+        return { passed: results.length - failed.length, failed: failed.length, failures: failed, all: results.map((r) => `${r.ok ? 'ok' : 'FAIL'} ${r.name} ${r.detail}`) };
+      };
+    </script>
+  </body>
+</html>

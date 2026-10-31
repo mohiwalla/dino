@@ -1,0 +1,249 @@
+/* Chrome-style pixel HUD. Sizes come from JS as CSS px per art pixel:
+   --hud-u (headline text), --hud-s (small text), --hud-b (button icons). */
+
+.hud {
+  --hud-u: 3px;
+  --hud-s: 2px;
+  --hud-b: 2px;
+  --hud-ink: #535353;
+  --hud-wash: rgba(247, 247, 247, 0.55);
+  --hud-margin: max(12px, calc(var(--hud-u) * 5));
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--hud-ink);
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.hud canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  flex: none;
+}
+
+.hud-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Score ── */
+.hud-score {
+  position: absolute;
+  z-index: 1;
+  top: calc(var(--safe-top) + var(--hud-margin));
+  right: calc(var(--safe-right) + var(--hud-margin));
+}
+
+/* ── Buttons ── */
+.hud-bar {
+  position: absolute;
+  z-index: 1;
+  top: calc(var(--safe-top) + var(--hud-margin) - 10px);
+  left: calc(var(--safe-left) + var(--hud-margin) - 10px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-btn {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--hud-s) * 3);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.hud-btn:hover {
+  opacity: 1;
+}
+
+.hud-btn:active {
+  transform: translateY(1px);
+}
+
+.hud-btn:focus {
+  outline: none;
+}
+
+.hud-btn:focus-visible {
+  outline: 2px dashed var(--hud-ink);
+  outline-offset: -2px;
+  opacity: 1;
+}
+
+.hud-btn-pause {
+  display: none;
+}
+
+.hud[data-touch='true'][data-phase='playing'] .hud-btn-pause,
+.hud[data-touch='true'][data-phase='paused'] .hud-btn-pause {
+  display: flex;
+}
+
+/* ── Centre panels ── */
+.hud-panel {
+  position: absolute;
+  left: calc(var(--safe-left) + 8px);
+  right: calc(var(--safe-right) + 8px);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hud[data-phase='title'] .hud-title,
+.hud[data-phase='crashed'] .hud-over,
+.hud[data-phase='paused'] .hud-paused {
+  display: flex;
+}
+
+.hud-title {
+  top: 64%;
+  gap: calc(var(--hud-u) * 5);
+}
+
+.hud-press {
+  animation: hud-breathe 1.8s ease-in-out infinite;
+}
+
+.hud-legend {
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: calc(var(--hud-s) * 3) calc(var(--hud-s) * 5);
+  opacity: 0.85;
+}
+
+.hud[data-touch='false'] .hud-legend-desktop,
+.hud[data-touch='true'] .hud-legend-touch {
+  display: flex;
+}
+
+.hud-over {
+  top: 22%;
+  gap: calc(var(--hud-u) * 6);
+}
+
+.hud-new-high {
+  visibility: hidden;
+  margin-bottom: calc(var(--hud-u) * -1);
+}
+
+.hud[data-new-high='true'] .hud-new-high {
+  visibility: visible;
+  animation: hud-flash 0.5s steps(1, end) 4;
+}
+
+.hud-over .hud-hint {
+  opacity: 0;
+  transition: opacity 250ms ease;
+}
+
+.hud[data-can-restart='true'] .hud-over .hud-hint {
+  opacity: 0.85;
+}
+
+.hud-paused {
+  inset: 0;
+  justify-content: center;
+  gap: calc(var(--hud-u) * 5);
+  background: var(--hud-wash);
+}
+
+.hud-paused .hud-hint {
+  opacity: 0.85;
+}
+
+/* ── FPS ── */
+.hud-fps {
+  position: absolute;
+  left: calc(var(--safe-left) + var(--hud-margin));
+  bottom: calc(var(--safe-bottom) + var(--hud-margin));
+  display: none;
+  opacity: 0.8;
+}
+
+.hud[data-fps='true'] .hud-fps {
+  display: block;
+}
+
+/* Narrow screens: one legend entry per line, no separators; the camera button shows its
+   mode name only briefly after a switch, under the button, so the bar clears the score. */
+@media (max-width: 559px) {
+  .hud-legend {
+    flex-direction: column;
+  }
+
+  .hud .hud-sep {
+    display: none;
+  }
+
+  .hud-btn-camera {
+    position: relative;
+  }
+
+  .hud-btn-camera .hud-btn-label {
+    position: absolute;
+    top: 100%;
+    left: 10px;
+    display: none;
+  }
+
+  .hud[data-label-peek='true'] .hud-btn-camera .hud-btn-label {
+    display: block;
+  }
+}
+
+/* Narrow and low-density: the 2 px minimum art pixel makes the score too wide to share a row. */
+@media (max-width: 559px) and (max-resolution: 1.49dppx) {
+  .hud-bar {
+    top: calc(var(--safe-top) + var(--hud-margin) + var(--hud-u) * 9);
+  }
+}
+
+@keyframes hud-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes hud-flash {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-press,
+  .hud[data-new-high='true'] .hud-new-high {
+    animation: none;
+  }
+}

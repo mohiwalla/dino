@@ -1,0 +1,197 @@
+// The camera rig: per-mode framings fitted to the viewport, a title close-up that swoops out
+// when the run starts, critically damped transitions, gentle height follow, a speed-dependent
+// fov and a short crash shake.
+
+import * as THREE from 'three';
+import { RUNNER } from '../config';
+import type { CameraMode, CameraRig, GameEvent, GameSnapshot } from '../types';
+import {
+  computeBasis,
+  dir,
+  distanceOf,
+  FOV,
+  fitFraming,
+  FRAMING_LENGTH,
+  type Framing,
+  MODES,
+  mixFraming,
+  PITCH,
+  right,
+  SIZE,
+  TITLES,
+  TX,
+  TY,
+  TZ,
+  up,
+} from './camera-framing';
+
+const SWOOP_MS = 1500;
+/** SmoothDamp times (s): ~0.8 s to settle on a mode change, tighter while tracking the swoop curve. */
+const SMOOTH_TIME = 0.26;
+const SWOOP_SMOOTH_TIME = 0.1;
+/** Extra cinematic fov (degrees) and chase pitch drop (radians) at MAX_SPEED. */
+const SPEED_FOV = 4;
+const SPEED_PITCH = -0.035;
+const SHAKE_MS = 420;
+/** Shake amplitude as a fraction of the view's half-height. */
+const SHAKE_AMOUNT = 0.022;
+const MAX_DT_MS = 100;
+/** Fraction of the T-Rex's height the title close-up follows, so the first jump stays in frame mid-swoop. */
+const TITLE_FOLLOW = 1;
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/** Unity-style SmoothDamp on one component of `cur`, a critically damped spring. */
+function smoothDamp(cur: Framing, vel: Framing, target: Framing, i: number, smoothTime: number, dt: number): void {
+  const omega = 2 / smoothTime;
+  const x = omega * dt;
+  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = cur[i] - target[i];
+  const temp = (vel[i] + omega * change) * dt;
+  vel[i] = (vel[i] - omega * temp) * decay;
+  cur[i] = target[i] + (change + temp) * decay;
+}
+
+function prefersReducedMotion(): MediaQueryList | null {
+  return typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+}
+
+export function createCameraRig(initialMode: CameraMode): CameraRig {
+  const camera = new THREE.PerspectiveCamera(40, 16 / 9, 2, 6000);
+  const reducedMotion = prefersReducedMotion();
+  let mode = initialMode;
+  let aspect = 16 / 9;
+
+  const fitted = {} as Record<CameraMode, Framing>;
+  const fittedTitle = {} as Record<CameraMode, Framing>;
+  for (const m of Object.keys(MODES) as CameraMode[]) {
+    fitted[m] = new Float64Array(FRAMING_LENGTH);
+    fittedTitle[m] = new Float64Array(FRAMING_LENGTH);
+  }
+  const desired = new Float64Array(FRAMING_LENGTH);
+  const current = new Float64Array(FRAMING_LENGTH);
+  const velocity = new Float64Array(FRAMING_LENGTH);
+  const lookAt = new THREE.Vector3();
+
+  let initialized = false;
+  /** 0 = title close-up, 1 = the mode's play framing. */
+  let titleBlend = 0;
+  let swoopMs = -1;
+  let shakeMs = 0;
+  let shakeClock = 0;
+
+  function refit(): void {
+    for (const m of Object.keys(MODES) as CameraMode[]) {
+      fitFraming(fitted[m], MODES[m], aspect);
+      fitFraming(fittedTitle[m], TITLES[m], aspect);
+    }
+  }
+  refit();
+
+  function computeDesired(curr: GameSnapshot, trexY: number): void {
+    mixFraming(desired, fittedTitle[mode], fitted[mode], titleBlend);
+    const speedT = THREE.MathUtils.clamp((curr.speed - RUNNER.SPEED) / (RUNNER.MAX_SPEED - RUNNER.SPEED), 0, 1) * titleBlend;
+    desired[TY] += (TITLE_FOLLOW + (MODES[mode].follow - TITLE_FOLLOW) * titleBlend) * Math.max(0, trexY);
+    if (mode === 'cinematic') widenFov(desired, SPEED_FOV * speedT);
+    if (mode === 'chase') desired[PITCH] += SPEED_PITCH * speedT;
+  }
+
+  /** Widen the fov in place: the camera keeps its distance, so the view genuinely gets wider. */
+  function widenFov(f: Framing, degrees: number): void {
+    const dist = distanceOf(f);
+    f[FOV] += degrees;
+    f[SIZE] = dist * Math.tan(THREE.MathUtils.degToRad(f[FOV]) / 2);
+  }
+
+  function advanceSwoop(curr: GameSnapshot, dtMs: number): void {
+    if (curr.phase === 'title') {
+      titleBlend = 0;
+      swoopMs = -1;
+      return;
+    }
+    // A run already in progress (e.g. the rig was created mid-game) swoops out on its own.
+    if (titleBlend < 1 && swoopMs < 0) swoopMs = 0;
+    if (swoopMs < 0) return;
+    swoopMs += dtMs;
+    titleBlend = easeInOutCubic(Math.min(1, swoopMs / SWOOP_MS));
+    if (swoopMs >= SWOOP_MS) swoopMs = -1;
+  }
+
+  /** Damped pseudo-random offset of the look-at, in the camera's screen plane. */
+  function applyShake(dtMs: number, dist: number): void {
+    if (shakeMs <= 0) return;
+    shakeMs = Math.max(0, shakeMs - dtMs);
+    shakeClock += dtMs / 1000;
+    const k = shakeMs / SHAKE_MS;
+    const amp = SHAKE_AMOUNT * k * k * dist * Math.tan(THREE.MathUtils.degToRad(current[FOV]) / 2);
+    const sx = amp * (Math.sin(shakeClock * 71) * 0.7 + Math.sin(shakeClock * 113 + 1.3) * 0.3);
+    const sy = amp * (Math.sin(shakeClock * 89 + 0.4) * 0.7 + Math.sin(shakeClock * 131 + 2.1) * 0.3);
+    const ox = right[0] * sx + up[0] * sy;
+    const oy = right[1] * sx + up[1] * sy;
+    const oz = right[2] * sx + up[2] * sy;
+    camera.position.x += ox;
+    camera.position.y += oy;
+    camera.position.z += oz;
+    lookAt.x += ox;
+    lookAt.y += oy;
+    lookAt.z += oz;
+  }
+
+  function applyToCamera(dtMs: number): void {
+    computeBasis(current);
+    const dist = distanceOf(current);
+    lookAt.set(current[TX], current[TY], current[TZ]);
+    camera.position.set(lookAt.x + dir[0] * dist, lookAt.y + dir[1] * dist, lookAt.z + dir[2] * dist);
+    applyShake(dtMs, dist);
+    camera.lookAt(lookAt);
+    if (camera.fov !== current[FOV]) {
+      camera.fov = current[FOV];
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  return {
+    camera,
+
+    get mode() {
+      return mode;
+    },
+
+    setMode(next) {
+      mode = next;
+    },
+
+    resize(width, height) {
+      aspect = Math.max(1e-3, width) / Math.max(1, height);
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+      refit();
+    },
+
+    update(curr, trex, dtMs) {
+      const dt = Math.min(Math.max(dtMs, 0), MAX_DT_MS);
+      advanceSwoop(curr, dt);
+      computeDesired(curr, trex.position.y);
+      if (!initialized) {
+        current.set(desired);
+        initialized = true;
+      }
+      const smoothTime = swoopMs >= 0 ? SWOOP_SMOOTH_TIME : SMOOTH_TIME;
+      if (dt > 0) for (let i = 0; i < FRAMING_LENGTH; i++) smoothDamp(current, velocity, desired, i, smoothTime, dt / 1000);
+      applyToCamera(dt);
+    },
+
+    handleEvents(events: GameEvent[]) {
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (e.type === 'start' && swoopMs < 0 && titleBlend < 1) swoopMs = 0;
+        else if (e.type === 'crash' && !reducedMotion?.matches) {
+          shakeMs = SHAKE_MS;
+          shakeClock = 0;
+        }
+      }
+    },
+  };
+}

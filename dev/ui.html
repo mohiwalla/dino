@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>HUD dev</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!--
+      HUD over a stand-in 3D scene, driven by fake snapshots.
+        ?state=title|titlehi|playing|flash|crashed|crashwait|newhigh|paused|night|nightover   (omit to cycle)
+        &touch=1  &night=0..1  &fps=60  &mode=cinematic|side|chase  &muted=1  &bg=plain
+    -->
+    <div id="app"><div id="hud"></div></div>
+    <script type="module">
+      import * as THREE from 'three';
+      import { VoxelGrid, buildVoxelGeometry } from '/src/render/voxel.ts';
+      import { PALETTE } from '/src/config.ts';
+      import { createHud } from '/src/ui/hud.ts';
+
+      const q = new URLSearchParams(location.search);
+      const app = document.getElementById('app');
+
+      // ── Stand-in scene (reference camera + lighting from the brief) ──
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.shadowMap.enabled = true;
+      renderer.setPixelRatio(devicePixelRatio);
+      app.prepend(renderer.domElement);
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight('#ffffff', '#9c9c9c', 2.4));
+      const sun = new THREE.DirectionalLight('#ffffff', 2.1);
+      sun.position.set(170 - 150, 20 + 300, 220);
+      sun.target.position.set(170, 20, 0);
+      sun.castShadow = true;
+      Object.assign(sun.shadow.camera, { left: -400, right: 400, top: 300, bottom: -300, near: 1, far: 1200 });
+      sun.shadow.mapSize.set(2048, 2048);
+      scene.add(sun, sun.target);
+      const camera = new THREE.PerspectiveCamera(40, 1, 1, 4000);
+      camera.position.set(-70, 95, 300);
+      camera.lookAt(170, 20, 0);
+
+      const ink = new THREE.MeshLambertMaterial({ color: PALETTE.day.ink, vertexColors: true });
+      const groundMat = new THREE.MeshLambertMaterial({ color: PALETTE.day.ground });
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 1200), groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      function voxels(build, x, z = 0) {
+        const g = build();
+        const m = new THREE.Mesh(buildVoxelGeometry(g), [ink]);
+        m.position.set(x, 0, z);
+        m.castShadow = m.receiveShadow = true;
+        scene.add(m);
+      }
+      function cactus(h) {
+        const g = new VoxelGrid(17, h, 7);
+        const r = Math.round;
+        g.fillBox(6, 0, 1, 11, h, 6, 1);
+        g.fillBox(0, r(h * 0.35), 2, 3, r(h * 0.8), 5, 1);
+        g.fillBox(0, r(h * 0.35), 2, 6, r(h * 0.35) + 3, 5, 1);
+        g.fillBox(14, r(h * 0.45), 2, 17, r(h * 0.85), 5, 1);
+        g.fillBox(11, r(h * 0.45), 2, 17, r(h * 0.45) + 3, 5, 1);
+        return g;
+      }
+      function dino() {
+        const g = new VoxelGrid(44, 47, 14);
+        g.fillBox(22, 30, 3, 44, 47, 11, 1);
+        g.fillBox(6, 12, 2, 30, 34, 12, 1);
+        g.fillBox(0, 18, 5, 8, 30, 9, 1);
+        g.fillBox(10, 0, 4, 14, 14, 7, 1);
+        g.fillBox(20, 0, 7, 24, 14, 10, 1);
+        return g;
+      }
+      voxels(dino, 0);
+      voxels(() => cactus(35), 150);
+      voxels(() => cactus(50), 330, -10);
+      voxels(() => cactus(50), 356, -10);
+      voxels(() => cactus(35), 600, 20);
+
+      function lerpHex(a, b, t) {
+        return new THREE.Color(a).lerp(new THREE.Color(b), t);
+      }
+      function setNight(t) {
+        scene.background = q.get('bg') === 'plain' ? lerpHex(PALETTE.day.bg, PALETTE.night.bg, t) : lerpHex(PALETTE.day.bg, PALETTE.night.bg, t);
+        scene.fog = new THREE.Fog(scene.background, 600, 1600);
+        ink.color.copy(lerpHex(PALETTE.day.ink, PALETTE.night.ink, t));
+        groundMat.color.copy(lerpHex(PALETTE.day.ground, PALETTE.night.ground, t));
+      }
+      if (q.get('bg') === 'plain') scene.children.filter((c) => c.isMesh).forEach((m) => (m.visible = false));
+
+      function resize() {
+        renderer.setSize(innerWidth, innerHeight);
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+      }
+      addEventListener('resize', resize);
+      resize();
+
+      // ── Fake snapshots ──
+      const base = {
+        phase: 'playing', frame: 0, runFrames: 0, speed: 6, distance: 0, score: 0, highScore: 0, scoreFlash: false,
+        canRestart: false, night: 0, moonPhase: 0, obstacles: [],
+        trex: { x: 0, y: 0, width: 44, height: 47, status: 'running', frame: 'run1', vy: 0, speedDrop: false },
+      };
+      const STATES = {
+        title: { phase: 'title' },
+        titlehi: { phase: 'title', highScore: 1234 },
+        playing: { phase: 'playing', score: 45, highScore: 123, live: true },
+        flash: { phase: 'playing', score: 300, highScore: 1234, scoreFlash: true },
+        crashed: { phase: 'crashed', score: 456, highScore: 1234, canRestart: true, crash: false },
+        crashwait: { phase: 'crashed', score: 456, highScore: 1234, canRestart: false, crash: false },
+        newhigh: { phase: 'crashed', score: 1500, highScore: 1500, canRestart: true, crash: true },
+        paused: { phase: 'paused', score: 612, highScore: 1500 },
+        night: { phase: 'playing', score: 812, highScore: 1500, night: 1, live: true },
+        nightover: { phase: 'crashed', score: 1702, highScore: 1702, night: 1, canRestart: true, crash: true },
+      };
+      const names = Object.keys(STATES);
+      const fixed = q.get('state');
+      const ctx = {
+        cameraMode: q.get('mode') ?? 'cinematic',
+        muted: q.get('muted') === '1',
+        touch: q.get('touch') === '1',
+        fps: q.has('fps') ? Number(q.get('fps')) : null,
+      };
+
+      const hud = createHud(document.getElementById('hud'));
+      const actions = [];
+      hud.onAction((a) => {
+        actions.push(a);
+        if (a === 'toggleMute') ctx.muted = !ctx.muted;
+        if (a === 'toggleCamera') ctx.cameraMode = { cinematic: 'side', side: 'chase', chase: 'cinematic' }[ctx.cameraMode];
+      });
+      window.__hud = { hud, ctx, actions };
+
+      let current = null;
+      let t0 = performance.now();
+      function enter(name) {
+        const st = STATES[name];
+        current = { name, st, s: { ...base, ...st, night: Number(q.get('night') ?? st.night ?? 0) } };
+        hud.handleEvents(st.crash !== undefined ? [{ type: 'restart' }, { type: 'crash', score: st.score, newHighScore: st.crash }] : [{ type: 'restart' }]);
+        setNight(current.s.night);
+        t0 = performance.now();
+        document.title = `HUD: ${name}`;
+      }
+      enter(fixed ?? names[0]);
+      let idx = 0;
+      let last = performance.now();
+      function frame(now) {
+        if (!fixed && now - t0 > 2500) enter(names[(idx = (idx + 1) % names.length)]);
+        if (current.st.live) current.s.score = current.st.score + Math.floor((now - t0) / 110);
+        if (ctx.fps !== null && q.get('fps') === 'live') ctx.fps = 1000 / Math.max(1, now - last);
+        last = now;
+        hud.update(current.s, ctx);
+        renderer.render(scene, camera);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>
