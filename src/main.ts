@@ -296,4 +296,13 @@ function main(): void {
   requestAnimationFrame(frame);
 }
 
+/** Offline support (production builds only; a service worker would fight Vite's dev server). */
+function registerServiceWorker(): void {
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err: unknown) => console.warn('Service worker registration failed', err));
+  });
+}
+
 main();
+registerServiceWorker();

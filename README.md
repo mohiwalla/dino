@@ -53,6 +53,7 @@ bun run preview    # serve dist/
 bun test           # simulation + autopilot tests
 node scripts/playtest.mjs http://localhost:4173/   # headless playtest, screenshots in /tmp/dino-shots/playtest/
 node scripts/shot.mjs <url> <out.png> [options]   # one-off headless screenshots
+node scripts/offline-check.mjs http://localhost:4173/   # loads once, goes offline, reloads and plays
 bun scripts/make-favicon.ts                       # regenerate public/favicon.ico from the T-Rex sprite
 ```
 
@@ -66,3 +67,7 @@ The `dev/` folder has standalone test pages for each module (`/dev/models.html`,
 - `src/render/`: voxel mesher, models, world (sky, ground, lights, night), entities, camera.
 - `src/ui/`, `src/input/`, `src/audio/`: the pixel HUD, input and sound effects.
 - `src/main.ts`: the fixed-step loop that wires everything together.
+
+## Offline
+
+Production builds register a service worker (`sw/sw.js`, filled in by the plugin in `vite.config.ts`) that precaches every file of the build. After one online visit, the game loads and plays with no network. Each build gets a new cache version, and old caches are deleted. The dev server never registers it.
