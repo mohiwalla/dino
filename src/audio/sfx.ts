@@ -199,8 +199,9 @@ export function createSfx(): Sfx {
       clips.stopCrash();
     },
 
-    preloadFunny() {
+    preloadFunny(nsfw) {
       const c = ensureContext();
+      clips.setNsfw(c, nsfw);
       if (c) clips.load(c);
     },
   };

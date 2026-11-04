@@ -160,8 +160,8 @@ export interface GameSimOptions {
 /** Non-gameplay actions, routed by main.ts. */
 export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme' | 'toggleConfig' | 'signOut';
 
-/** classic: Chrome's runner. funny: not built yet (shown as coming soon). */
-export type GameMode = 'classic' | 'funny';
+/** regular: Chrome's runner. funny: farts, flops and meme crash clips. nsfw: funny with the NSFW crash clips too. */
+export type GameMode = 'regular' | 'funny' | 'nsfw';
 
 /** Everything the config panel edits. main.ts owns and persists it. */
 export interface Settings {
@@ -209,8 +209,8 @@ export interface Sfx {
   setVolume(volume: number): void;
   /** Resume the AudioContext; call from a user gesture. Safe to call repeatedly. */
   unlock(): void;
-  /** Fetch funny mode's recorded clips ahead of the first jump. */
-  preloadFunny(): void;
+  /** Fetch funny mode's recorded clips ahead of the first jump; `nsfw` picks the crash clip set. */
+  preloadFunny(nsfw: boolean): void;
   /** Cut funny mode's crash clip short (a new run started). */
   stopFunny(): void;
 }

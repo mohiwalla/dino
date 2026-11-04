@@ -1,6 +1,6 @@
 // Funny mode's sounds. fart (jump) plays a random recorded clip from ./farts, never the same
 // one twice in a row and at a slightly random pitch; slide (crash) plays a random meme clip
-// from ./crash. The farts are small and all decoded up front; the crash clips are 1.4 MB, so
+// from ./crash (NSFW mode adds ./crash/nsfw). The farts are small and all decoded up front; the crash clips are 1.4 MB, so
 // only the next one is fetched and decoded ahead of time, and the service worker caches each
 // as it is fetched rather than precaching them all.
 // Until they have loaded, synthesised stand-ins below play instead:
@@ -8,7 +8,8 @@
 //   slide – a cartoon bonk, then a slide whistle falling away.
 
 const FART_URLS = Object.values(import.meta.glob<string>('./farts/*.mp3', { eager: true, query: '?url', import: 'default' }));
-const CRASH_URLS = Object.values(import.meta.glob<string>('./crash/*.mp3', { eager: true, query: '?url', import: 'default' }));
+const SAFE_CRASH_URLS = Object.values(import.meta.glob<string>('./crash/*.mp3', { eager: true, query: '?url', import: 'default' }));
+const ALL_CRASH_URLS = Object.values(import.meta.glob<string>('./crash/**/*.mp3', { eager: true, query: '?url', import: 'default' }));
 /** Clip level against the synthesised sounds. */
 const CLIP_GAIN = 1;
 
@@ -95,6 +96,8 @@ export function scheduleSlide(ctx: BaseAudioContext, destination: AudioNode, t0:
 export interface FunnyClips {
   /** Start fetching and decoding the clips (safe to call repeatedly). */
   load(ctx: BaseAudioContext): void;
+  /** NSFW mode: crash clips come from the whole set, not just the safe ones. */
+  setNsfw(ctx: BaseAudioContext | null, on: boolean): void;
   /** Plays a clip if they have loaded; returns false so the caller can fall back to synthesis. */
   play(ctx: BaseAudioContext, destination: AudioNode, name: 'fart' | 'slide', t0: number): boolean;
   /** Cuts a crash clip still playing (the next run started). */
@@ -105,9 +108,10 @@ export function createFunnyClips(): FunnyClips {
   let farts: AudioBuffer[] = [];
   let loading = false;
   let last = -1;
-  /** The next crash clip, decoded ahead; `crashIndex` is the one it came from. */
+  let crashUrls = SAFE_CRASH_URLS;
+  /** The next crash clip, decoded ahead; `crashUrl` is the one it came from. */
   let nextCrash: AudioBuffer | null = null;
-  let crashIndex = -1;
+  let crashUrl = '';
   let fetchingCrash = false;
   let playingCrash: AudioBufferSourceNode | null = null;
 
@@ -118,13 +122,15 @@ export function createFunnyClips(): FunnyClips {
 
   /** Picks a different random crash clip and decodes it, ready for the next crash. */
   function prepareCrash(ctx: BaseAudioContext): void {
-    if (fetchingCrash || nextCrash || CRASH_URLS.length === 0) return;
+    if (fetchingCrash || nextCrash || crashUrls.length === 0) return;
     fetchingCrash = true;
-    let i = Math.floor(Math.random() * CRASH_URLS.length);
-    if (i === crashIndex && CRASH_URLS.length > 1) i = (i + 1) % CRASH_URLS.length;
-    crashIndex = i;
-    decode(ctx, CRASH_URLS[i])
-      .then((b) => (nextCrash = b))
+    const urls = crashUrls;
+    let i = Math.floor(Math.random() * urls.length);
+    if (urls[i] === crashUrl && urls.length > 1) i = (i + 1) % urls.length;
+    const url = (crashUrl = urls[i]);
+    decode(ctx, url)
+      // Dropped if the mode changed while it decoded and the clip isn't in the new set.
+      .then((b) => (nextCrash = crashUrls.includes(url) ? b : null))
       .catch(() => undefined)
       .finally(() => (fetchingCrash = false));
   }
@@ -137,6 +143,14 @@ export function createFunnyClips(): FunnyClips {
         .then((buffers) => (farts = buffers))
         .catch(() => (loading = false));
       prepareCrash(ctx);
+    },
+
+    setNsfw(ctx, on) {
+      const urls = on ? ALL_CRASH_URLS : SAFE_CRASH_URLS;
+      if (urls === crashUrls) return;
+      crashUrls = urls;
+      if (!urls.includes(crashUrl)) nextCrash = null;
+      if (ctx && loading) prepareCrash(ctx);
     },
 
     play(ctx, destination, name, t0) {

@@ -147,8 +147,9 @@ export function createConfigPanel(
     row('MODE'),
     'Mode',
     [
-      ['classic', 'CLASSIC'],
+      ['regular', 'REGULAR'],
       ['funny', 'FUNNY'],
+      ['nsfw', 'NSFW'],
     ] as const satisfies readonly (readonly [GameMode, string])[],
     (mode) => emitSettings({ mode }),
   );

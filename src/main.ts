@@ -18,6 +18,7 @@ import {
   type BoardView,
   type CameraMode,
   type GameEvent,
+  type GameMode,
   type GameSim,
   type GameSnapshot,
   type HudContext,
@@ -55,6 +56,12 @@ function writeStorage(key: string, value: string): void {
   } catch {
     // Private mode / disabled storage: settings just don't persist.
   }
+}
+
+/** The saved mode; 'classic' is regular's old name. */
+function readMode(): GameMode {
+  const saved = readStorage(STORAGE_KEYS.mode);
+  return saved === 'funny' || saved === 'nsfw' ? saved : 'regular';
 }
 
 function initialCameraMode(): CameraMode {
@@ -147,7 +154,7 @@ function main(): void {
     ranked: readStorage(STORAGE_KEYS.ranked) !== '0',
     showBoard: readStorage(STORAGE_KEYS.showBoard) !== '0',
     startFast: readStorage(STORAGE_KEYS.startFast) === '1',
-    mode: readStorage(STORAGE_KEYS.mode) === 'funny' ? 'funny' : 'classic',
+    mode: readMode(),
   };
   sim.setStartFast(settings.startFast);
   /** While the config panel is open the game is frozen and gameplay input is dropped. */
@@ -155,9 +162,15 @@ function main(): void {
   const hudCtx: HudContext = { cameraMode: rig.mode, settings, configOpen, dark, touch: input.touch, fps: null };
   applyPageTheme(dark);
   entities.setDebug(debug);
-  entities.setFunny(settings.mode === 'funny');
-  rig.setFunny(settings.mode === 'funny');
-  if (settings.mode === 'funny') sfx.preloadFunny();
+  applyMode(settings.mode);
+
+  /** Funny and NSFW play alike; only their crash clips differ. */
+  function applyMode(mode: GameMode): void {
+    const funny = mode !== 'regular';
+    entities.setFunny(funny);
+    rig.setFunny(funny);
+    if (funny) sfx.preloadFunny(mode === 'nsfw');
+  }
 
   function resize(): void {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -226,9 +239,7 @@ function main(): void {
     }
     if (change.mode !== undefined) {
       writeStorage(STORAGE_KEYS.mode, change.mode);
-      entities.setFunny(change.mode === 'funny');
-      rig.setFunny(change.mode === 'funny');
-      if (change.mode === 'funny') sfx.preloadFunny();
+      applyMode(change.mode);
     }
   }
 
@@ -305,11 +316,11 @@ function main(): void {
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
       frameEvents.push(e);
-      if (e.type === 'jump') sfx.play(settings.mode === 'funny' ? 'fart' : 'jump');
+      if (e.type === 'jump') sfx.play(settings.mode !== 'regular' ? 'fart' : 'jump');
       else if (e.type === 'start' || e.type === 'restart') sfx.stopFunny();
       else if (e.type === 'milestone') sfx.play('milestone');
       else if (e.type === 'crash') {
-        sfx.play(settings.mode === 'funny' ? 'slide' : 'crash');
+        sfx.play(settings.mode !== 'regular' ? 'slide' : 'crash');
         if (!replay) writeStorage(STORAGE_KEYS.highScore, String(curr.highScore));
       }
     }

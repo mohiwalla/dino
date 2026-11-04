@@ -122,7 +122,7 @@
       const fixed = q.get('state');
       const ctx = {
         cameraMode: q.get('mode') ?? 'cinematic',
-        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, startFast: false, mode: 'classic' },
+        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, startFast: false, mode: 'regular' },
         configOpen: q.get('config') === '1',
         touch: q.get('touch') === '1',
         fps: q.has('fps') ? Number(q.get('fps')) : null,

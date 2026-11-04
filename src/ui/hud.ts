@@ -231,7 +231,7 @@ export function createHud(root: HTMLElement): Hud {
   add(over, layoutText('NEW HIGH SCORE'), 'hud-new-high', 'small', isCrashed);
   const gameOverClassic = layoutText('G A M E  O V E R', { space: 7 });
   const gameOver = add(over, gameOverClassic, 'hud-game-over', 'big', isCrashed);
-  let mode: Settings['mode'] = 'classic';
+  let mode: Settings['mode'] = 'regular';
   add(over, RESTART_ICON, 'hud-restart', 'big', isCrashed);
   const restartDesktop = layoutText('PRESS SPACE TO RESTART');
   const restartTouch = layoutText('TAP TO RESTART');
@@ -350,7 +350,7 @@ export function createHud(root: HTMLElement): Hud {
     hud.dataset.phase = s.phase;
     if (s.phase === 'crashed') {
       const line = FUNNY_GAME_OVER[Math.floor(Math.random() * FUNNY_GAME_OVER.length)];
-      gameOver.setMask(mode === 'funny' ? layoutText(line) : gameOverClassic);
+      gameOver.setMask(mode !== 'regular' ? layoutText(line) : gameOverClassic);
     }
     if (s.phase === 'crashed') status.textContent = `Game over. Score ${crashScore || s.score}.${newHighScore ? ' New high score!' : ''}`;
     else if (s.phase === 'paused') status.textContent = 'Paused.';
