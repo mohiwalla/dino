@@ -73,7 +73,7 @@
   gap: calc(var(--hud-s) * 4);
 }
 
-.hud:not([data-account='off']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
+.hud:not([data-account='off']):not([data-show-board='false']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
   display: flex;
 }
 
@@ -120,6 +120,7 @@
 }
 
 /* ── Buttons ── */
+
 .hud-bar {
   position: absolute;
   z-index: 1;
@@ -325,5 +326,280 @@
   .hud-press,
   .hud[data-new-high='true'] .hud-new-high {
     animation: none;
+  }
+}
+
+/* ── Config panel ── */
+.hud-config-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--hud-wash);
+  pointer-events: auto;
+}
+
+.hud[data-config='true'] .hud-config-backdrop {
+  display: flex;
+}
+
+.hud-config {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: calc(var(--hud-s) * 7) calc(var(--hud-s) * 12);
+  max-width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  padding: calc(var(--hud-s) * 10) calc(var(--hud-s) * 12);
+  background: var(--hud-bg, #f7f7f7);
+  box-shadow: 0 0 0 var(--hud-s) var(--hud-ink);
+}
+
+.hud-config-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--hud-s) * 10);
+  margin-bottom: calc(var(--hud-s) * 2);
+}
+
+.hud .hud-config-label {
+  opacity: 0.7;
+}
+
+.hud-config-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  margin-top: calc(var(--hud-s) * 10);
+}
+
+.hud-chip-with-icon {
+  gap: calc(var(--hud-s) * 4);
+}
+
+.hud-chip.hud-chip-danger {
+  background: var(--hud-danger, #c62828);
+  box-shadow: none;
+}
+
+.hud-config-footer[hidden] {
+  display: none;
+}
+
+.hud-config-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--hud-s) * 3);
+}
+
+.hud-config-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 32px;
+  gap: calc(var(--hud-s) * 5);
+}
+
+.hud-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: calc(var(--hud-s) * 2) calc(var(--hud-s) * 4);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  box-shadow: inset 0 0 0 var(--hud-s) var(--hud-ink);
+  cursor: pointer;
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.hud-chip[hidden] {
+  display: none;
+}
+
+/* Same feel as the HUD bar buttons. */
+.hud-chip:hover {
+  opacity: 1;
+}
+
+.hud-chip:active {
+  transform: translateY(1px);
+}
+
+.hud-chip:focus {
+  outline: none;
+}
+
+.hud-chip:focus-visible {
+  outline: var(--hud-s) dashed var(--hud-ink);
+  outline-offset: var(--hud-s);
+}
+
+.hud-chip[aria-pressed='true'] {
+  opacity: 1;
+  box-shadow: inset 0 0 0 calc(var(--hud-s) * 2) var(--hud-ink);
+}
+
+/* The chosen radio is filled with ink; its text is knocked out (PixelCanvas.setInverse). */
+.hud-chip[aria-checked='true'] {
+  opacity: 1;
+  background: var(--hud-ink);
+}
+
+.hud-chip[role='radio'][aria-checked='false'] {
+  opacity: 0.55;
+}
+
+.hud-chip[role='radio'][aria-checked='false']:hover {
+  opacity: 0.85;
+}
+
+.hud-chip:disabled,
+.hud-chip:disabled:hover {
+  cursor: default;
+  opacity: 0.3;
+  transform: none;
+}
+
+.hud-chip[aria-checked='true']:disabled {
+  opacity: 0.6;
+}
+
+/* On/off switch: a pixel track with a square knob that slides right when on. */
+.hud-switch {
+  position: relative;
+  width: calc(var(--hud-s) * 16);
+  height: calc(var(--hud-s) * 9);
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 0 0 0 var(--hud-s) var(--hud-ink);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.hud-switch::before {
+  /* A 32 px tall hit area around the small track. */
+  content: '';
+  position: absolute;
+  inset: calc(50% - 16px) calc(var(--hud-s) * -2);
+}
+
+.hud-switch:hover {
+  opacity: 1;
+}
+
+.hud-switch:active {
+  transform: translateY(1px);
+}
+
+.hud-switch:focus {
+  outline: none;
+}
+
+.hud-switch:focus-visible {
+  outline: var(--hud-s) dashed var(--hud-ink);
+  outline-offset: var(--hud-s);
+}
+
+.hud-switch[aria-checked='true'] {
+  opacity: 1;
+  background: var(--hud-ink);
+}
+
+.hud-switch-knob {
+  position: absolute;
+  top: calc(var(--hud-s) * 2);
+  left: calc(var(--hud-s) * 2);
+  width: calc(var(--hud-s) * 5);
+  height: calc(var(--hud-s) * 5);
+  background: var(--hud-ink);
+  transition: left 120ms steps(3, end);
+}
+
+.hud-switch[aria-checked='true'] .hud-switch-knob {
+  left: calc(var(--hud-s) * 9);
+  background: var(--hud-bg, #f7f7f7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-switch-knob {
+    transition: none;
+  }
+}
+
+.hud-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: calc(var(--hud-s) * 60);
+  max-width: 40vw;
+  height: 32px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.hud-range:focus {
+  outline: none;
+}
+
+.hud-range:focus-visible {
+  outline: var(--hud-s) dashed var(--hud-ink);
+}
+
+.hud-range::-webkit-slider-runnable-track {
+  height: var(--hud-s);
+  background: var(--hud-ink);
+}
+
+.hud-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: calc(var(--hud-s) * 4);
+  height: calc(var(--hud-s) * 8);
+  margin-top: calc(var(--hud-s) * -3.5);
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-ink);
+}
+
+.hud-range::-moz-range-track {
+  height: var(--hud-s);
+  background: var(--hud-ink);
+}
+
+.hud-range::-moz-range-thumb {
+  width: calc(var(--hud-s) * 4);
+  height: calc(var(--hud-s) * 8);
+  border: 0;
+  border-radius: 0;
+  background: var(--hud-ink);
+}
+
+@media (max-width: 559px) {
+  .hud-config {
+    grid-template-columns: 1fr;
+    gap: calc(var(--hud-s) * 4);
+  }
+
+  .hud-config-controls {
+    margin-bottom: calc(var(--hud-s) * 3);
   }
 }

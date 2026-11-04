@@ -21,8 +21,8 @@ export interface RankedOptions {
   /** The sim being played (main.ts swaps it for replays). */
   sim: () => GameSim;
   mobile: boolean;
-  /** Why runs can't be ranked right now (autopilot, ?seed=, a replay), or null if they can. */
-  blocker: () => string | null;
+  /** False while runs can't be ranked (ranking off, autopilot, ?seed=, a replay). */
+  rankable: () => boolean;
   onView: (view: BoardView) => void;
 }
 
@@ -31,8 +31,9 @@ export interface Ranked {
   stepped(input: InputFrame, events: readonly GameEvent[]): void;
   paused(): void;
   resumed(): void;
-  /** Something made the current run unfair (debug view, autopilot): it stops counting. */
-  forfeit(reason: string): void;
+  /** Something made the current run unfair (debug view, autopilot) or ranking was turned off: it stops counting. */
+  forfeit(): void;
+  signOut(): Promise<void>;
   readonly account: Account | null;
 }
 
@@ -99,7 +100,7 @@ export function createRanked(opts: RankedOptions): Ranked {
     if (!shownNote && account?.banned) shownNote = 'BANNED FROM THE BOARD';
     else if (!shownNote && reachable && !account) shownNote = 'SIGN IN TO JOIN THE TEAM BOARD';
     else if (!shownNote && account && entries.length === 0) shownNote = 'NO RANKED RUNS YET';
-    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', entries, note: shownNote, live });
+    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, note: shownNote, live });
   }
 
   async function refresh(): Promise<void> {
@@ -126,12 +127,13 @@ export function createRanked(opts: RankedOptions): Ranked {
     publish();
   }
 
-  function unranked(r: Run, reason: string): void {
+  /** The run stops counting; the HUD just drops its RANKED line. */
+  function unranked(r: Run): void {
     if (r.state === 'finished') return;
     r.state = 'unranked';
     clearInterval(r.timer);
     if (r === run) {
-      live = reason ? `UNRANKED · ${reason}` : '';
+      live = '';
       publish();
     }
   }
@@ -156,7 +158,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       .then(() => undefined)
       .catch((err: unknown) => {
         // Network trouble and rate limits: the inputs stay queued for the next beat.
-        if (err instanceof ApiError && err.status >= 400 && err.status !== 429) unranked(r, 'SERVER SAID NO');
+        if (err instanceof ApiError && err.status >= 400 && err.status !== 429) unranked(r);
       })
       .finally(() => {
         r.sending = null;
@@ -195,9 +197,8 @@ export function createRanked(opts: RankedOptions): Ranked {
     run = r;
     note = '';
     live = '';
-    const blocker = opts.blocker();
-    if (!account || account.banned || blocker) {
-      unranked(r, account && !account.banned ? (blocker ?? '') : '');
+    if (!account || account.banned || !opts.rankable()) {
+      unranked(r);
       return;
     }
     finishing
@@ -207,7 +208,7 @@ export function createRanked(opts: RankedOptions): Ranked {
         const sim = opts.sim();
         const s = sim.getSnapshot();
         if (s.phase === 'crashed' || s.runFrames > STEPS.CLEAR || s.obstacles.length > 0) {
-          unranked(r, 'SERVER TOO SLOW');
+          unranked(r);
           return;
         }
         sim.setObstacleRandom(mulberry32(seed));
@@ -217,7 +218,7 @@ export function createRanked(opts: RankedOptions): Ranked {
         live = 'RANKED';
         publish();
       })
-      .catch((err: unknown) => unranked(r, err instanceof ApiError && err.status === 409 ? 'RELOAD THE PAGE' : 'OFFLINE'));
+      .catch(() => unranked(r));
     publish();
   }
 
@@ -253,8 +254,14 @@ export function createRanked(opts: RankedOptions): Ranked {
     resumed() {
       if (run) beat(run);
     },
-    forfeit(reason) {
-      if (run && (run.state === 'starting' || run.state === 'ranked')) unranked(run, reason);
+    forfeit() {
+      if (run && (run.state === 'starting' || run.state === 'ranked')) unranked(run);
+    },
+    async signOut() {
+      if (run && (run.state === 'starting' || run.state === 'ranked')) unranked(run);
+      await api.logout().catch(() => undefined);
+      note = '';
+      await refresh();
     },
     get account() {
       return account;

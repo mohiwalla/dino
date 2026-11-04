@@ -29,7 +29,7 @@ export default defineConfig({
   base: './',
   // The game is shared through a Cloudflare quick tunnel, so the Host header is *.trycloudflare.com.
   // /api/* is the leaderboard Worker; run it next to Vite with `bun run dev:api`.
-  server: { host: true, allowedHosts: true, proxy: { '/api': 'http://localhost:8787' } },
+  server: { host: true, allowedHosts: true, proxy: { '/api': process.env.DINO_API ?? 'http://localhost:8787' } },
   preview: { host: true, allowedHosts: true },
   build: {
     target: 'es2022',

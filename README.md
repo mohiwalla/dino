@@ -16,6 +16,7 @@ soft shadows. Built with Vite, three.js and TypeScript.
 | Mute | M | Speaker button | – |
 | Dark mode | D | Moon / sun button | – |
 | Pause / resume | P, Escape | Pause button | – |
+| Configuration (account, volume, ranked runs, team board, mode) | ⚙ button | ⚙ button | – |
 | Debug view (collision boxes, FPS) | ` (backquote) | – | – |
 
 The game also pauses on its own when the tab is hidden, and resumes when the tab comes back.

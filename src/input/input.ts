@@ -50,6 +50,10 @@ function inUi(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-ui]') !== null;
 }
 
+function inDialog(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="dialog"]') !== null;
+}
+
 function pressed(pad: Gamepad, index: number): boolean {
   return pad.buttons[index]?.pressed ?? false;
 }
@@ -96,8 +100,10 @@ export function createInput(): InputController {
 
   function onKeyDown(e: KeyboardEvent): void {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    // A focused HUD button handles its own Space / Enter activation.
-    if ((e.code === 'Space' || RESTART_CODES.has(e.code)) && inUi(e.target)) return;
+    // Enter activates a focused HUD button; Space only does inside a dialog (the config panel),
+    // so the game still jumps on Space after focus returns to a HUD button.
+    if (RESTART_CODES.has(e.code) && inUi(e.target)) return;
+    if (e.code === 'Space' && inDialog(e.target)) return;
     const jump = JUMP_CODES.has(e.code);
     const duck = DUCK_CODES.has(e.code);
     const restart = RESTART_CODES.has(e.code);

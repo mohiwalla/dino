@@ -12,7 +12,14 @@ export interface Tones {
   dim: string;
   /** Soft 1 px outline in the background colour, keeps text legible over the 3D scene. */
   halo: string;
+  /** The background colour, for text knocked out of an ink fill (see PixelCanvas.setTint). */
+  bg: string;
+  /** Red for destructive actions (sign out). */
+  danger: string;
 }
+
+/** bg: knocked out of an ink fill. danger: drawn in red. */
+export type Tint = 'bg' | 'danger' | null;
 
 /** Empty art pixels around the mask, room for the halo. */
 export const PAD = 1;
@@ -27,6 +34,7 @@ export class PixelCanvas {
   private unit = 0;
   private dpr = 0;
   private tonesVersion = -1;
+  private tint: Tint = null;
 
   constructor(
     mask: PixelMask,
@@ -43,6 +51,13 @@ export class PixelCanvas {
   setMask(mask: PixelMask): void {
     if (mask === this.mask) return;
     this.mask = mask;
+    this.dirty = true;
+  }
+
+  /** Draw every tone in one other colour instead of ink (see Tint). */
+  setTint(tint: Tint): void {
+    if (tint === this.tint) return;
+    this.tint = tint;
     this.dirty = true;
   }
 
@@ -63,8 +78,9 @@ export class PixelCanvas {
     if (!g) return;
     if (!sizeChanged) g.clearRect(0, 0, this.el.width, this.el.height);
     if (this.halo) this.drawHalo(g, unit, tones.halo);
-    this.drawTone(g, unit, 1, tones.ink);
-    this.drawTone(g, unit, 2, tones.dim);
+    const tinted = this.tint === null ? null : tones[this.tint];
+    this.drawTone(g, unit, 1, tinted ?? tones.ink);
+    this.drawTone(g, unit, 2, tinted ?? tones.dim);
   }
 
   /** Returns true if the backing store was resized (which also clears it). */

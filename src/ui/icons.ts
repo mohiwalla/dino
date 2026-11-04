@@ -113,3 +113,37 @@ export const SUN_ICON: PixelMask = maskFromRows([
   '..#.....#..',
   '#....#....#',
 ]);
+
+export const GEAR_ICON: PixelMask = maskFromRows([
+  '....###....',
+  '.##.###.##.',
+  '.#########.',
+  '..##...##..',
+  '####...####',
+  '..##...##..',
+  '.#########.',
+  '.##.###.##.',
+  '....###....',
+]);
+
+/** A door frame with an arrow leaving it. */
+export const SIGN_OUT_ICON: PixelMask = maskFromRows([
+  '######...',
+  '##.......',
+  '##...##..',
+  '##.######',
+  '##...##..',
+  '##.......',
+  '######...',
+]);
+
+/** An arrow going into a door frame. */
+export const SIGN_IN_ICON: PixelMask = maskFromRows([
+  '...######',
+  '.......##',
+  '..##...##',
+  '######.##',
+  '..##...##',
+  '.......##',
+  '...######',
+]);

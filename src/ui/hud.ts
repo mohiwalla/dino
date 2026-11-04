@@ -5,10 +5,11 @@
 
 import './hud.css';
 import { PALETTE, SCORE } from '../config';
-import type { BoardView, CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, UiAction } from '../types';
+import type { BoardView, CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, Settings, UiAction } from '../types';
+import { createConfigPanel } from './config';
 import { createMask, digitCount, layoutRuns, layoutText, MONO_PITCH, GLYPH_H, writeChar, writeNumber, type PixelMask } from './font';
 import { api } from '../net/api';
-import { CAMERA_ICON, MOON_ICON, PAUSE_ICON, PLAY_ICON, RESTART_ICON, SPEAKER_OFF_ICON, SPEAKER_ON_ICON, SUN_ICON } from './icons';
+import { CAMERA_ICON, GEAR_ICON, MOON_ICON, PAUSE_ICON, PLAY_ICON, RESTART_ICON, SPEAKER_OFF_ICON, SPEAKER_ON_ICON, SUN_ICON } from './icons';
 import { PixelCanvas, type Tones } from './pixel-canvas';
 
 /** Which pixel scale an element uses: headline text, small text, or button icons. */
@@ -18,6 +19,7 @@ interface ViewState {
   phase: GamePhase;
   touch: boolean;
   fps: boolean;
+  config: boolean;
 }
 
 interface Item {
@@ -67,6 +69,10 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** Sign-out red, darker on the light theme and lighter on the dark one. */
+const DAY_DANGER = '#c62828';
+const NIGHT_DANGER = '#ff6e6e';
+const DANGER = [hexToRgb(DAY_DANGER), hexToRgb(NIGHT_DANGER)] as const;
 const DAY_INK = hexToRgb(PALETTE.day.ink);
 const NIGHT_INK = hexToRgb(PALETTE.night.ink);
 const DAY_BG = hexToRgb(PALETTE.day.bg);
@@ -112,9 +118,11 @@ function computeUnits(width: number, height: number, dpr: number): Units {
 export function createHud(root: HTMLElement): Hud {
   const listeners = new Set<(action: UiAction) => void>();
   const emit = (action: UiAction): void => listeners.forEach((cb) => cb(action));
+  const settingsListeners = new Set<(change: Partial<Settings>) => void>();
+  const emitSettings = (change: Partial<Settings>): void => settingsListeners.forEach((cb) => cb(change));
   const items: Item[] = [];
-  const tones: Tones = { version: 0, ink: PALETTE.day.ink, dim: PALETTE.day.ink, halo: 'transparent' };
-  const view: ViewState = { phase: 'title', touch: false, fps: false };
+  const tones: Tones = { version: 0, ink: PALETTE.day.ink, dim: PALETTE.day.ink, halo: 'transparent', bg: PALETTE.day.bg, danger: DAY_DANGER };
+  const view: ViewState = { phase: 'title', touch: false, fps: false, config: false };
 
   const add = (parent: HTMLElement, mask: PixelMask, className: string, tier: Tier, visible: Item['visible'] = always, halo = true): PixelCanvas => {
     const canvas = new PixelCanvas(mask, className, halo);
@@ -152,6 +160,10 @@ export function createHud(root: HTMLElement): Hud {
   const pauseBtn = button('hud-btn-pause', 'togglePause');
   const pauseVisible = (v: ViewState): boolean => v.touch && (v.phase === 'playing' || v.phase === 'paused');
   const pauseIcon = add(pauseBtn, PAUSE_ICON, 'hud-icon', 'button', pauseVisible, false);
+  const configBtn = button('hud-btn-config', 'toggleConfig');
+  configBtn.setAttribute('aria-label', 'Configuration');
+  configBtn.setAttribute('aria-haspopup', 'dialog');
+  add(configBtn, GEAR_ICON, 'hud-icon', 'button', always, false);
   // A plain link, so signing in never depends on a click handler.
   const signInLink = el('a', 'hud-btn hud-btn-signin', bar);
   signInLink.href = api.loginUrl(location.pathname + location.search);
@@ -175,6 +187,12 @@ export function createHud(root: HTMLElement): Hud {
   const boardNote = add(boardBox, layoutText(''), 'hud-board-note', 'small', isMenu);
   const boardList = el('ol', 'hud-status', boardBox);
   let boardKey = '';
+  let boardView: BoardView | null = null;
+
+  // ── Config panel ──
+  const config = createConfigPanel(hud, (parent, mask, className, tier) => add(parent, mask, className, tier, (v) => v.config, false), emit, emitSettings);
+  let lastConfigOpen: boolean | null = null;
+  const backdropHasFocus = (): boolean => hud.querySelector('.hud-config-backdrop')?.contains(document.activeElement) ?? false;
 
   // ── Title ──
   const isTitle = (v: ViewState): boolean => v.phase === 'title';
@@ -234,7 +252,8 @@ export function createHud(root: HTMLElement): Hud {
   let peekTimer = 0;
   let newHighScore = false;
   let crashScore = 0;
-  let scoreDigits = 0;
+  let scoreSlots = 0;
+  let lastHighOnly: boolean | null = null;
   let lastScore = -1;
   let lastHigh = -1;
   let lastHideCurrent: boolean | null = null;
@@ -272,22 +291,30 @@ export function createHud(root: HTMLElement): Hud {
     tones.ink = `rgb(${ink[0]},${ink[1]},${ink[2]})`;
     tones.dim = `rgb(${mix(ink[0], bg[0], 0.2)},${mix(ink[1], bg[1], 0.2)},${mix(ink[2], bg[2], 0.2)})`;
     tones.halo = `rgba(${bg[0]},${bg[1]},${bg[2]},0.72)`;
+    tones.bg = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+    const [dd, nd] = DANGER;
+    tones.danger = `rgb(${mix(dd[0], nd[0], t)},${mix(dd[1], nd[1], t)},${mix(dd[2], nd[2], t)})`;
+    hud.style.setProperty('--hud-danger', tones.danger);
     hud.style.setProperty('--hud-ink', tones.ink);
     hud.style.setProperty('--hud-wash', `rgba(${bg[0]},${bg[1]},${bg[2]},0.55)`);
+    hud.style.setProperty('--hud-bg', `rgb(${bg[0]},${bg[1]},${bg[2]})`);
   }
 
   /** "HI 00123  00045" on a fixed slot grid; HI in the 80% tone, current score optional. */
-  function updateScore(score: number, high: number, hideCurrent: boolean): void {
-    if (score === lastScore && high === lastHigh && hideCurrent === lastHideCurrent) return;
+  /** `highOnly` (title screen) drops the current score's slots, so HI sits flush right. */
+  function updateScore(score: number, high: number, hideCurrent: boolean, highOnly: boolean): void {
+    if (score === lastScore && high === lastHigh && hideCurrent === lastHideCurrent && highOnly === lastHighOnly) return;
+    lastHighOnly = highOnly;
     lastScore = score;
     lastHigh = high;
     lastHideCurrent = hideCurrent;
     // Nothing drawn (title screen, no high score yet): the leaderboard moves up into the space.
     hud.dataset.scoreEmpty = String(high === 0 && hideCurrent);
     const digits = Math.max(SCORE.MAX_DIGITS, digitCount(score), digitCount(high));
-    if (digits !== scoreDigits) {
-      scoreDigits = digits;
-      scoreMask = createMask((3 + digits + SCORE_GAP_SLOTS + digits) * MONO_PITCH - 1, GLYPH_H);
+    const slots = highOnly ? 3 + digits : 3 + digits + SCORE_GAP_SLOTS + digits;
+    if (slots !== scoreSlots) {
+      scoreSlots = slots;
+      scoreMask = createMask(slots * MONO_PITCH - 1, GLYPH_H);
       scoreCanvas.setMask(scoreMask);
     } else {
       scoreMask.bits.fill(0);
@@ -298,7 +325,7 @@ export function createHud(root: HTMLElement): Hud {
       writeChar(scoreMask, 'I', 1, 2);
       writeNumber(scoreMask, high, 3, digits, true, 2);
     }
-    if (!hideCurrent) writeNumber(scoreMask, score, 3 + digits + SCORE_GAP_SLOTS, digits, true, 1);
+    if (!hideCurrent && !highOnly) writeNumber(scoreMask, score, 3 + digits + SCORE_GAP_SLOTS, digits, true, 1);
   }
 
   function updatePhase(s: GameSnapshot): void {
@@ -329,10 +356,22 @@ export function createHud(root: HTMLElement): Hud {
       cameraLabel.setMask(layoutText(CAMERA_LABELS[ctx.cameraMode]));
       cameraBtn.setAttribute('aria-label', `Camera: ${ctx.cameraMode}. Switch camera`);
     }
-    if (ctx.muted !== lastMuted) {
-      lastMuted = ctx.muted;
-      soundIcon.setMask(ctx.muted ? SPEAKER_OFF_ICON : SPEAKER_ON_ICON);
-      soundBtn.setAttribute('aria-pressed', String(ctx.muted));
+    const muted = ctx.settings.muted;
+    if (muted !== lastMuted) {
+      lastMuted = muted;
+      soundIcon.setMask(muted ? SPEAKER_OFF_ICON : SPEAKER_ON_ICON);
+      soundBtn.setAttribute('aria-pressed', String(muted));
+    }
+    // No ranked runs, no board.
+    const showBoard = String(ctx.settings.showBoard && ctx.settings.ranked);
+    if (hud.dataset.showBoard !== showBoard) hud.dataset.showBoard = showBoard;
+    config.update(ctx.settings, boardView, ctx.touch);
+    if (ctx.configOpen !== lastConfigOpen) {
+      lastConfigOpen = ctx.configOpen;
+      hud.dataset.config = String(ctx.configOpen);
+      configBtn.setAttribute('aria-expanded', String(ctx.configOpen));
+      if (ctx.configOpen) config.focus();
+      else if (backdropHasFocus()) configBtn.focus({ preventScroll: true });
     }
     if (ctx.dark !== lastDark) {
       lastDark = ctx.dark;
@@ -385,6 +424,7 @@ export function createHud(root: HTMLElement): Hud {
     const key = JSON.stringify(view);
     if (key === boardKey) return;
     boardKey = key;
+    boardView = view;
     hud.dataset.account = view.account;
     view.entries.forEach((e, i) => {
       if (!rowCanvases[i]) rowCanvases.push(add(boardRows, createMask(1, GLYPH_H), 'hud-board-row', 'small', isMenu));
@@ -414,10 +454,11 @@ export function createHud(root: HTMLElement): Hud {
       updatePhase(s);
       updateContext(s, ctx);
       updateFlags(s);
-      updateScore(s.score, s.highScore, s.phase === 'title' || s.scoreFlash);
+      updateScore(s.score, s.highScore, s.phase === 'title' || s.scoreFlash, s.phase === 'title');
       view.phase = s.phase;
       view.touch = ctx.touch;
       view.fps = ctx.fps !== null;
+      view.config = ctx.configOpen;
       renderCanvases();
     },
 
@@ -438,11 +479,17 @@ export function createHud(root: HTMLElement): Hud {
       return () => listeners.delete(cb);
     },
 
+    onSettings(cb: (change: Partial<Settings>) => void): () => void {
+      settingsListeners.add(cb);
+      return () => settingsListeners.delete(cb);
+    },
+
     dispose(): void {
       window.removeEventListener('resize', onResize);
       observer?.disconnect();
       clearTimeout(peekTimer);
       listeners.clear();
+      settingsListeners.clear();
       hud.remove();
     },
   };

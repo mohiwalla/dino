@@ -154,7 +154,22 @@ export interface GameSimOptions {
 // ─── Input (src/input) ───────────────────────────────────────────────────────────────────
 
 /** Non-gameplay actions, routed by main.ts. */
-export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme';
+export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme' | 'toggleConfig' | 'signOut';
+
+/** classic: Chrome's runner. funny: not built yet (shown as coming soon). */
+export type GameMode = 'classic' | 'funny';
+
+/** Everything the config panel edits. main.ts owns and persists it. */
+export interface Settings {
+  /** Sound effects volume, 0..1. */
+  volume: number;
+  muted: boolean;
+  /** Submit runs to the team leaderboard while signed in. */
+  ranked: boolean;
+  /** Show the team board on the title and game-over screens. */
+  showBoard: boolean;
+  mode: GameMode;
+}
 
 export interface InputController {
   /**
@@ -182,11 +197,14 @@ export interface Sfx {
   play(name: SfxName): void;
   readonly muted: boolean;
   setMuted(muted: boolean): void;
+  /** 0..1. */
+  readonly volume: number;
+  setVolume(volume: number): void;
   /** Resume the AudioContext; call from a user gesture. Safe to call repeatedly. */
   unlock(): void;
 }
 
-// Factory: src/audio/sfx.ts     export function createSfx(): Sfx  (persists mute in localStorage)
+// Factory: src/audio/sfx.ts     export function createSfx(): Sfx  (persists mute and volume in localStorage)
 
 // ─── Rendering (src/render) ──────────────────────────────────────────────────────────────
 
@@ -258,7 +276,9 @@ export interface CameraRig {
 
 export interface HudContext {
   cameraMode: CameraMode;
-  muted: boolean;
+  settings: Readonly<Settings>;
+  /** The config panel is open. */
+  configOpen: boolean;
   /** Dark theme on. The snapshot's `night` is already remapped for it; this only drives the toggle button. */
   dark: boolean;
   touch: boolean;
@@ -280,6 +300,9 @@ export interface BoardEntry {
 export interface BoardView {
   /** off: no leaderboard server (offline, or a static host), so nothing is shown. */
   account: 'off' | 'signedOut' | 'signedIn';
+  /** Who is signed in (the config panel shows it). */
+  name: string | null;
+  email: string | null;
   /** The top rows, plus the player's own row at the end if it is further down. */
   entries: readonly BoardEntry[];
   /** A line under the board on the title and game-over screens (the last run's verdict). */
@@ -292,8 +315,10 @@ export interface Hud {
   update(s: GameSnapshot, ctx: HudContext): void;
   setBoard(view: BoardView): void;
   handleEvents(events: GameEvent[]): void;
-  /** HUD buttons (camera, mute, theme, pause) emit UiActions. */
+  /** HUD buttons (camera, mute, theme, pause, config) emit UiActions. */
   onAction(cb: (action: UiAction) => void): () => void;
+  /** The config panel's controls report edits here. */
+  onSettings(cb: (change: Partial<Settings>) => void): () => void;
   dispose(): void;
 }
 

@@ -84,6 +84,24 @@ function writeMuted(muted: boolean): void {
   }
 }
 
+/** 0..1, scales MASTER_GAIN. Defaults to full. */
+function readVolume(): number {
+  try {
+    const v = Number(localStorage.getItem(STORAGE_KEYS.volume) ?? '1');
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function writeVolume(volume: number): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.volume, String(volume));
+  } catch {
+    // Same as mute: just won't persist.
+  }
+}
+
 type AudioContextCtor = typeof AudioContext;
 
 function audioContextCtor(): AudioContextCtor | null {
@@ -93,6 +111,7 @@ function audioContextCtor(): AudioContextCtor | null {
 
 export function createSfx(): Sfx {
   let muted = readMuted();
+  let volume = readVolume();
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
   let failed = false;
@@ -107,7 +126,7 @@ export function createSfx(): Sfx {
     try {
       ctx = new Ctor({ latencyHint: 'interactive' });
       master = ctx.createGain();
-      master.gain.value = MASTER_GAIN;
+      master.gain.value = MASTER_GAIN * volume;
       master.connect(ctx.destination);
     } catch {
       failed = true;
@@ -153,6 +172,16 @@ export function createSfx(): Sfx {
       if (value === muted) return;
       muted = value;
       writeMuted(value);
+    },
+
+    get volume(): number {
+      return volume;
+    },
+
+    setVolume(value: number): void {
+      volume = Math.min(1, Math.max(0, value));
+      writeVolume(volume);
+      if (ctx && master) master.gain.setTargetAtTime(MASTER_GAIN * volume, ctx.currentTime, 0.01);
     },
 
     unlock,

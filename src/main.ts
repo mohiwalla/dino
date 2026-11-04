@@ -22,6 +22,7 @@ import {
   type GameSnapshot,
   type HudContext,
   type InputFrame,
+  type Settings,
   type UiAction,
 } from './types';
 import { createHud } from './ui/hud';
@@ -140,7 +141,16 @@ function main(): void {
   /** What the renderers and HUD see: the sim snapshots with `night` remapped for the theme. */
   const shownPrev: GameSnapshot = { ...curr };
   const shownCurr: GameSnapshot = { ...curr };
-  const hudCtx: HudContext = { cameraMode: rig.mode, muted: sfx.muted, dark, touch: input.touch, fps: null };
+  const settings: Settings = {
+    volume: sfx.volume,
+    muted: sfx.muted,
+    ranked: readStorage(STORAGE_KEYS.ranked) !== '0',
+    showBoard: readStorage(STORAGE_KEYS.showBoard) !== '0',
+    mode: 'classic',
+  };
+  /** While the config panel is open the game is frozen and gameplay input is dropped. */
+  let configOpen = false;
+  const hudCtx: HudContext = { cameraMode: rig.mode, settings, configOpen, dark, touch: input.touch, fps: null };
   applyPageTheme(dark);
   entities.setDebug(debug);
 
@@ -167,7 +177,7 @@ function main(): void {
   const ranked = createRanked({
     sim: () => sim,
     mobile,
-    blocker: () => (replayId ? 'REPLAY' : autoplay ? 'AUTOPILOT' : seed !== null ? 'FIXED SEED' : debug ? 'DEBUG VIEW' : null),
+    rankable: () => settings.ranked && !replayId && !autoplay && seed === null && !debug,
     onView: (view) => {
       board = view;
       showBoard();
@@ -182,13 +192,41 @@ function main(): void {
         const cursor = createInputCursor(run.inputs);
         replay = { next: () => cursor.next(), left: run.steps };
         curr = prev = sim.getSnapshot();
-        replayLabel = { note: `REPLAY · ${run.name} · ${run.score ?? 0}`, live: `REPLAY · ${run.name}` };
+        const name = run.name.toUpperCase();
+        replayLabel = { note: `REPLAY · ${name} · ${run.score ?? 0}`, live: `REPLAY · ${name}` };
         showBoard();
       })
       .catch((err: unknown) => {
         replayLabel = { note: err instanceof ApiError && err.status === 401 ? 'SIGN IN TO WATCH REPLAYS' : 'REPLAY NOT FOUND', live: '' };
         showBoard();
       });
+  }
+
+  function applySettings(change: Partial<Settings>): void {
+    Object.assign(settings, change);
+    if (change.muted !== undefined) sfx.setMuted(change.muted);
+    if (change.volume !== undefined) {
+      sfx.setVolume(change.volume);
+      sfx.play('jump'); // hear the new level
+    }
+    if (change.ranked !== undefined) {
+      writeStorage(STORAGE_KEYS.ranked, change.ranked ? '1' : '0');
+      if (!change.ranked) ranked.forfeit();
+    }
+    if (change.showBoard !== undefined) writeStorage(STORAGE_KEYS.showBoard, change.showBoard ? '1' : '0');
+    if (change.mode !== undefined) writeStorage(STORAGE_KEYS.mode, change.mode);
+  }
+
+  /** Opening the panel mid-run pauses it; the player resumes from the pause screen. */
+  function toggleConfig(): void {
+    configOpen = !configOpen;
+    if (configOpen && curr.phase === 'playing') {
+      sim.pause();
+      ranked.paused();
+      autoPaused = false;
+      curr = prev = sim.getSnapshot();
+    }
+    acc = 0;
   }
 
   function togglePause(): void {
@@ -209,18 +247,26 @@ function main(): void {
         setCameraMode(CAMERA_MODES[(CAMERA_MODES.indexOf(rig.mode) + 1) % CAMERA_MODES.length]);
         break;
       case 'toggleMute':
-        sfx.setMuted(!sfx.muted);
+        applySettings({ muted: !settings.muted });
         break;
       case 'toggleTheme':
         toggleTheme();
         break;
       case 'togglePause':
-        togglePause();
+        // Escape / P close the config panel first.
+        if (configOpen) toggleConfig();
+        else togglePause();
+        break;
+      case 'toggleConfig':
+        toggleConfig();
+        break;
+      case 'signOut':
+        void ranked.signOut();
         break;
       case 'toggleDebug':
         debug = !debug;
         entities.setDebug(debug);
-        if (debug) ranked.forfeit('DEBUG VIEW');
+        if (debug) ranked.forfeit();
         break;
     }
   }
@@ -299,7 +345,7 @@ function main(): void {
     entities.update(shownPrev, shownCurr, alpha, dtMs);
     rig.update(shownCurr, entities.trex, dtMs);
     hudCtx.cameraMode = rig.mode;
-    hudCtx.muted = sfx.muted;
+    hudCtx.configOpen = configOpen;
     hudCtx.dark = dark;
     hudCtx.touch = input.touch;
     hudCtx.fps = debug ? fps : null;
@@ -313,7 +359,10 @@ function main(): void {
     last = now;
     if (dt > 0) fps += (1000 / dt - fps) * FPS_SMOOTHING;
     if (frozen) acc = 0;
-    else if (curr.phase === 'paused') {
+    else if (configOpen) {
+      acc = 0;
+      input.sample(); // drop presses made while the panel is open
+    } else if (curr.phase === 'paused') {
       acc = 0;
       pollPaused();
     } else {
@@ -338,6 +387,7 @@ function main(): void {
 
   input.onAction(onAction);
   hud.onAction(onAction);
+  hud.onSettings(applySettings);
   const unlock = (): void => sfx.unlock();
   window.addEventListener('keydown', unlock, { once: true, capture: true });
   window.addEventListener('pointerdown', unlock, { once: true, capture: true });
@@ -351,7 +401,7 @@ function main(): void {
       advance,
       setAutoplay: (on: boolean) => {
         autoplay = on;
-        if (on) ranked.forfeit('AUTOPILOT');
+        if (on) ranked.forfeit();
       },
       setCameraMode,
       setDark: (on: boolean) => on !== dark && toggleTheme(),

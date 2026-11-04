@@ -214,6 +214,12 @@ export const STORAGE_KEYS = {
   muted: 'dino3d.muted',
   cameraMode: 'dino3d.cameraMode',
   theme: 'dino3d.theme',
+  volume: 'dino3d.volume',
+  /** "0" when the player turned ranked runs off in the config panel. */
+  ranked: 'dino3d.ranked',
+  /** "0" when the player hid the team board. */
+  showBoard: 'dino3d.showBoard',
+  mode: 'dino3d.mode',
   /** The last leaderboard and account seen, shown at once on the next load. */
   board: 'dino3d.board',
 } as const;

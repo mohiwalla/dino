@@ -70,5 +70,6 @@ export const api = {
   beat: (id: string, body: { steps: number; inputs: number[] }) => call<{ ok: true }>(`runs/${id}/beat`, body),
   finish: (id: string, body: { steps: number; inputs: number[] }) => call<FinishResult>(`runs/${id}/finish`, body),
   run: (id: string) => call<StoredRun>(`runs/${encodeURIComponent(id)}`),
+  logout: () => call<{ ok: true }>('auth/logout', {}),
   loginUrl: (next: string) => `/api/auth/login?next=${encodeURIComponent(next)}`,
 };
