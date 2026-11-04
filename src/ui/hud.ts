@@ -48,11 +48,24 @@ const TOUCH_LEGEND: readonly (readonly [string, string])[] = [
   ['TAP', 'JUMP'],
   ['SWIPE DOWN', 'DUCK'],
 ];
+/** Funny mode's game-over lines, one picked at random per crash. */
+const FUNNY_GAME_OVER: readonly string[] = [
+  'SKILL ISSUE',
+  'OOF',
+  'GG NO RE',
+  'BONK!',
+  'CACTUS: 1  YOU: 0',
+  'WASTED',
+  'NOT LIKE THIS',
+  'TOUCH GRASS',
+  'YEET FAILED',
+  'TASTES LIKE CACTUS',
+];
 const SCORE_GAP_SLOTS = 2;
 const FPS_SLOTS = 7;
-/** Leaderboard row: rank and dot, a phone mark for mobile runs, name, space, score. */
+/** Leaderboard row: rank and dot, a mark slot (⚡ start-fast, 📱 mobile), name, space, score. */
 const BOARD_NAME_SLOTS = 10;
-const BOARD_SCORE_SLOT = 3 + 1 + BOARD_NAME_SLOTS + 1;
+const BOARD_SCORE_SLOT = 3 + 2 + BOARD_NAME_SLOTS + 1;
 const BOARD_ROW_SLOTS = BOARD_SCORE_SLOT + SCORE.MAX_DIGITS;
 
 const always = (): boolean => true;
@@ -96,12 +109,13 @@ function boardName(name: string): string {
   return (words.length > 1 ? `${words[0]} ${words[words.length - 1][0]}` : plain).slice(0, BOARD_NAME_SLOTS);
 }
 
-function boardRow(rank: number, name: string, score: number, mobile: boolean, tone: number): PixelMask {
+function boardRow(rank: number, name: string, score: number, mobile: boolean, fast: boolean, tone: number): PixelMask {
   const mask = createMask(BOARD_ROW_SLOTS * MONO_PITCH - 1, GLYPH_H);
   writeNumber(mask, rank, 0, 2, false, tone);
   writeChar(mask, '.', 2, tone);
-  if (mobile) writeChar(mask, '📱', 3, tone);
-  [...boardName(name)].forEach((ch, i) => writeChar(mask, ch, 4 + i, tone));
+  if (fast) writeChar(mask, '⚡', 3, tone);
+  if (mobile) writeChar(mask, '📱', fast ? 4 : 3, tone);
+  [...boardName(name)].forEach((ch, i) => writeChar(mask, ch, 5 + i, tone));
   writeNumber(mask, score, BOARD_SCORE_SLOT, SCORE.MAX_DIGITS, true, tone);
   return mask;
 }
@@ -215,7 +229,9 @@ export function createHud(root: HTMLElement): Hud {
   const isCrashed = (v: ViewState): boolean => v.phase === 'crashed';
   const over = el('div', 'hud-panel hud-over', hud);
   add(over, layoutText('NEW HIGH SCORE'), 'hud-new-high', 'small', isCrashed);
-  add(over, layoutText('G A M E  O V E R', { space: 7 }), 'hud-game-over', 'big', isCrashed);
+  const gameOverClassic = layoutText('G A M E  O V E R', { space: 7 });
+  const gameOver = add(over, gameOverClassic, 'hud-game-over', 'big', isCrashed);
+  let mode: Settings['mode'] = 'classic';
   add(over, RESTART_ICON, 'hud-restart', 'big', isCrashed);
   const restartDesktop = layoutText('PRESS SPACE TO RESTART');
   const restartTouch = layoutText('TAP TO RESTART');
@@ -332,6 +348,10 @@ export function createHud(root: HTMLElement): Hud {
     if (s.phase === lastPhase) return;
     lastPhase = s.phase;
     hud.dataset.phase = s.phase;
+    if (s.phase === 'crashed') {
+      const line = FUNNY_GAME_OVER[Math.floor(Math.random() * FUNNY_GAME_OVER.length)];
+      gameOver.setMask(mode === 'funny' ? layoutText(line) : gameOverClassic);
+    }
     if (s.phase === 'crashed') status.textContent = `Game over. Score ${crashScore || s.score}.${newHighScore ? ' New high score!' : ''}`;
     else if (s.phase === 'paused') status.textContent = 'Paused.';
     else status.textContent = '';
@@ -428,7 +448,7 @@ export function createHud(root: HTMLElement): Hud {
     hud.dataset.account = view.account;
     view.entries.forEach((e, i) => {
       if (!rowCanvases[i]) rowCanvases.push(add(boardRows, createMask(1, GLYPH_H), 'hud-board-row', 'small', isMenu));
-      rowCanvases[i].setMask(boardRow(e.rank, e.name, e.score, e.mobile, e.me ? 1 : 2));
+      rowCanvases[i].setMask(boardRow(e.rank, e.name, e.score, e.mobile, e.fast, e.me ? 1 : 2));
       rowCanvases[i].el.classList.toggle('hud-board-me', e.me);
       rowCanvases[i].el.hidden = false;
     });
@@ -439,7 +459,7 @@ export function createHud(root: HTMLElement): Hud {
     boardList.replaceChildren(
       ...view.entries.map((e) => {
         const li = document.createElement('li');
-        li.textContent = `${e.rank}. ${e.name}${e.me ? ' (you)' : ''}: ${e.score}${e.mobile ? ', on mobile' : ''}`;
+        li.textContent = `${e.rank}. ${e.name}${e.me ? ' (you)' : ''}: ${e.score}${e.fast ? ', started fast' : ''}${e.mobile ? ', on mobile' : ''}`;
         return li;
       }),
     );
@@ -449,6 +469,7 @@ export function createHud(root: HTMLElement): Hud {
     setBoard,
 
     update(s: GameSnapshot, ctx: HudContext): void {
+      mode = ctx.settings.mode;
       measure();
       updateColors(s.night);
       updatePhase(s);

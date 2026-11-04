@@ -135,6 +135,8 @@ export interface GameSim {
    * STEPS.CLEAR) can be replayed exactly from its inputs (src/sim/replay.ts).
    */
   setObstacleRandom(random: (() => number) | null): void;
+  /** Runs started from now on begin at RUNNER.FAST_START_SPEED instead of RUNNER.SPEED. */
+  setStartFast(on: boolean): void;
 }
 
 export interface GameSimOptions {
@@ -145,6 +147,8 @@ export interface GameSimOptions {
   mobile?: boolean;
   /** Start on a game-over screen that accepts a restart at once (replays of restarted runs). */
   startCrashed?: boolean;
+  /** Runs begin at RUNNER.FAST_START_SPEED (see GameSim.setStartFast). */
+  startFast?: boolean;
 }
 
 // Factory: src/sim/game.ts      export function createGameSim(opts?: GameSimOptions): GameSim
@@ -166,6 +170,8 @@ export interface Settings {
   muted: boolean;
   /** Submit runs to the team leaderboard while signed in. */
   ranked: boolean;
+  /** Runs begin halfway to top speed. Ranked as usual, tagged on the board. */
+  startFast: boolean;
   /** Show the team board on the title and game-over screens. */
   showBoard: boolean;
   mode: GameMode;
@@ -191,7 +197,8 @@ export interface InputController {
 
 // ─── Audio (src/audio) ───────────────────────────────────────────────────────────────────
 
-export type SfxName = 'jump' | 'milestone' | 'crash';
+/** fart and slide are funny mode's jump and crash (src/audio/funny.ts). */
+export type SfxName = 'jump' | 'milestone' | 'crash' | 'fart' | 'slide';
 
 export interface Sfx {
   play(name: SfxName): void;
@@ -202,6 +209,10 @@ export interface Sfx {
   setVolume(volume: number): void;
   /** Resume the AudioContext; call from a user gesture. Safe to call repeatedly. */
   unlock(): void;
+  /** Fetch funny mode's recorded clips ahead of the first jump. */
+  preloadFunny(): void;
+  /** Cut funny mode's crash clip short (a new run started). */
+  stopFunny(): void;
 }
 
 // Factory: src/audio/sfx.ts     export function createSfx(): Sfx  (persists mute and volume in localStorage)
@@ -246,6 +257,8 @@ export interface Entities {
   handleEvents(events: GameEvent[]): void;
   /** Draw sim collision boxes as wireframes. */
   setDebug(on: boolean): void;
+  /** Funny mode: fart clouds on jumps, a spin-and-flop crash. Cosmetic only. */
+  setFunny(on: boolean): void;
   dispose(): void;
 }
 
@@ -265,6 +278,8 @@ export interface CameraRig {
   readonly mode: CameraMode;
   /** Smoothly transitions to the new mode. */
   setMode(mode: CameraMode): void;
+  /** Funny mode: after a crash the camera closes in on the T-Rex's face. */
+  setFunny(on: boolean): void;
   resize(width: number, height: number): void;
   update(curr: GameSnapshot, trex: THREE.Object3D, dtMs: number): void;
   handleEvents(events: GameEvent[]): void;
@@ -292,6 +307,8 @@ export interface BoardEntry {
   name: string;
   score: number;
   mobile: boolean;
+  /** Started fast (Settings.startFast). */
+  fast: boolean;
   /** The signed-in player's own row. */
   me: boolean;
 }

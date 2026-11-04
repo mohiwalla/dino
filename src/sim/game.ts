@@ -55,7 +55,9 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
   let phase: GamePhase = opts.startCrashed ? 'crashed' : 'title';
   let frame = 0;
   let runFrames = 0;
-  let speed: number = RUNNER.SPEED;
+  /** Speed each run starts at (RUNNER.FAST_START_SPEED for "start fast" runs). */
+  let startSpeed: number = opts.startFast ? RUNNER.FAST_START_SPEED : RUNNER.SPEED;
+  let speed = startSpeed;
   let distance = 0;
   let score = 0;
   let highScore = clampScore(opts.highScore ?? 0);
@@ -80,6 +82,7 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
     }
     phase = 'playing';
     events.push(START, JUMP);
+    speed = startSpeed;
     startJump(trex, speed);
     stepPlaying(input, false);
   }
@@ -99,7 +102,7 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
     events.push(RESTART);
     clearObstacles(field, events);
     runFrames = 0;
-    speed = RUNNER.SPEED;
+    speed = startSpeed;
     distance = 0;
     score = 0;
     crashSteps = 0;
@@ -188,6 +191,9 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
     },
     setObstacleRandom(r: Random | null) {
       obstacleRandom = r;
+    },
+    setStartFast(on: boolean) {
+      startSpeed = on ? RUNNER.FAST_START_SPEED : RUNNER.SPEED;
     },
   };
 }

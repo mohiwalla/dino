@@ -15,7 +15,7 @@ import { mulberry32 } from './rng';
  * run plays out. The server refuses runs recorded by a different version, because their
  * replay would no longer match. test/sim-replay.test.ts fails until this is bumped.
  */
-export const SIM_VERSION = 1;
+export const SIM_VERSION = 2;
 
 export interface RunSpec {
   /** Seeds the run's obstacle RNG (mulberry32). */
@@ -23,6 +23,8 @@ export interface RunSpec {
   mobile: boolean;
   /** The run was a restart from a game-over screen (no automatic first jump). */
   afterCrash: boolean;
+  /** Started at RUNNER.FAST_START_SPEED. Optional: runs recorded before it existed are normal. */
+  fast?: boolean;
 }
 
 const JUMP_PRESSED = 1;
@@ -122,7 +124,7 @@ export function checkInputs(inputs: unknown, steps: number): string | null {
 /** The sim a run is replayed in, before its first step. */
 export function createRunSim(spec: RunSpec): GameSim {
   // Cosmetic randomness (title-screen blinks) never affects a run, so any fixed seed works.
-  const sim = createGameSim({ random: mulberry32(0), mobile: spec.mobile, startCrashed: spec.afterCrash });
+  const sim = createGameSim({ random: mulberry32(0), mobile: spec.mobile, startCrashed: spec.afterCrash, startFast: spec.fast === true });
   sim.setObstacleRandom(mulberry32(spec.seed));
   return sim;
 }

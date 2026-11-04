@@ -294,7 +294,8 @@ describe('snapshots', () => {
     a.obstacles.length = 0;
     const c = sim.getSnapshot();
     expect(c.trex.y).not.toBe(999);
-    expect(c.obstacles.length).toBe(frozen.obstacles.length);
+    // A later step may have spawned more, but the frozen ones are untouched.
+    expect(c.obstacles.length).toBeGreaterThanOrEqual(frozen.obstacles.length);
     expect(c.obstacles[0].variants).toEqual(frozen.obstacles[0].variants);
     expect(c.obstacles[0].collisionBoxes).toEqual(frozen.obstacles[0].collisionBoxes);
     expect(c.obstacles[0].x).toBeLessThan(frozen.obstacles[0].x);

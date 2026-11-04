@@ -52,5 +52,18 @@ self.addEventListener('fetch', (event) => {
 
   // Everything else is content-hashed or static: cache first. ignoreVary because servers send
   // `Vary: Origin`, and module scripts are requested with an Origin header the precache lacked.
-  event.respondWith(caches.match(request, { ignoreVary: true }).then((hit) => hit ?? fetch(request)));
+  // Assets missing from the precache (funny mode's crash clips) are cached on first fetch.
+  event.respondWith(
+    caches.match(request, { ignoreVary: true }).then(
+      (hit) =>
+        hit ??
+        fetch(request).then((response) => {
+          if (response.ok && url.pathname.includes('/assets/')) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        }),
+    ),
+  );
 });

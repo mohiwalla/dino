@@ -64,7 +64,8 @@ export function updateObstacles(
   removeDespawned(field.list, events);
   const last = field.list[field.list.length - 1];
   if (last && last.x + last.width + last.gap >= RUNNER.SPAWN_X) return;
-  const o = spawnObstacle(field, speed, random, mobile);
+  // The run's first obstacle (nothing spawned since the field was cleared) comes in closer.
+  const o = spawnObstacle(field, speed, random, mobile, field.history.length === 0 ? RUNNER.FIRST_SPAWN_X : RUNNER.SPAWN_X);
   field.list.push(o);
   events.push({ type: 'spawn', id: o.id, kind: o.kind });
 }
@@ -90,7 +91,7 @@ function removeDespawned(list: Obstacle[], events: GameEvent[]): void {
 }
 
 /** Chrome Horizon.addNewObstacle + Obstacle.init. Records the kind in the history. */
-export function spawnObstacle(field: ObstacleField, speed: number, random: Random, mobile: boolean): Obstacle {
+export function spawnObstacle(field: ObstacleField, speed: number, random: Random, mobile: boolean, x: number = RUNNER.SPAWN_X): Obstacle {
   const kind = pickKind(field.history, speed, random);
   const type = OBSTACLES[kind];
   let size = randomInt(random, 1, RUNNER.MAX_OBSTACLE_LENGTH);
@@ -99,7 +100,7 @@ export function spawnObstacle(field: ObstacleField, speed: number, random: Rando
   const heights = mobile ? type.yUpMobile : type.yUp;
   const y = heights[randomInt(random, 0, heights.length - 1)];
   const speedOffset = type.speedOffset === 0 ? 0 : random() > 0.5 ? type.speedOffset : -type.speedOffset;
-  const minGap = Math.round(width * speed + type.minGap * RUNNER.GAP_COEFFICIENT);
+  const minGap = Math.round(width * speed * gapSpeedScale(speed) + type.minGap * RUNNER.GAP_COEFFICIENT);
   const gap = randomInt(random, minGap, Math.round(minGap * RUNNER.MAX_GAP_COEFFICIENT));
   const variants = pickVariants(kind, size, random);
 
@@ -111,7 +112,7 @@ export function spawnObstacle(field: ObstacleField, speed: number, random: Rando
     kind,
     size,
     variants,
-    x: RUNNER.SPAWN_X,
+    x,
     y,
     width,
     height: type.height,
@@ -121,6 +122,12 @@ export function spawnObstacle(field: ObstacleField, speed: number, random: Rando
     gap,
     collisionBoxes: obstacleCollisionBoxes(kind, size),
   };
+}
+
+/** 1 at the base speed, down to RUNNER.GAP_SPEED_SCALE_AT_MAX at MAX_SPEED. */
+export function gapSpeedScale(speed: number): number {
+  const t = Math.min(1, Math.max(0, (speed - RUNNER.SPEED) / (RUNNER.MAX_SPEED - RUNNER.SPEED)));
+  return 1 - (1 - RUNNER.GAP_SPEED_SCALE_AT_MAX) * t;
 }
 
 function pickKind(history: readonly ObstacleKind[], speed: number, random: Random): ObstacleKind {

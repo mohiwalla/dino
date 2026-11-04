@@ -12,6 +12,7 @@ export interface BoardEntryData {
   name: string;
   score: number;
   mobile: boolean;
+  fast: boolean;
   runId: string;
   me: boolean;
 }
@@ -36,6 +37,7 @@ export interface StoredRun {
   seed: number;
   mobile: boolean;
   afterCrash: boolean;
+  fast: boolean;
   steps: number;
   inputs: number[];
 }
@@ -66,7 +68,7 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: () => call<{ user: Account | null }>('me').then((r) => r.user),
   leaderboard: () => call<BoardData>('leaderboard'),
-  startRun: (body: { mobile: boolean; afterCrash: boolean; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
+  startRun: (body: { mobile: boolean; afterCrash: boolean; fast: boolean; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
   beat: (id: string, body: { steps: number; inputs: number[] }) => call<{ ok: true }>(`runs/${id}/beat`, body),
   finish: (id: string, body: { steps: number; inputs: number[] }) => call<FinishResult>(`runs/${id}/finish`, body),
   run: (id: string) => call<StoredRun>(`runs/${encodeURIComponent(id)}`),

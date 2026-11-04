@@ -10,8 +10,9 @@ const TAP: InputFrame = { ...NONE, jumpPressed: true };
 const HOLD: InputFrame = { ...NONE, jumpHeld: true };
 const DUCK: InputFrame = { ...NONE, duckHeld: true };
 
+/** T-Rex events only: obstacles start spawning (and despawning) while these tests run. */
 function types(events: GameEvent[]): string[] {
-  return events.map((e) => e.type);
+  return events.map((e) => e.type).filter((t) => t !== 'spawn' && t !== 'despawn');
 }
 
 /** Lengths of consecutive runs of equal values. */

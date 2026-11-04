@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SIM } from '../src/config';
+import { RUNNER, SIM } from '../src/config';
 import { autopilot } from '../src/sim/autopilot';
 import { createGameSim } from '../src/sim/game';
 import { checkInputs, createInputCursor, createInputRecorder, replayRun, SIM_VERSION, type RunSpec } from '../src/sim/replay';
@@ -102,6 +102,17 @@ describe('replay', () => {
     }
   });
 
+  test('start-fast runs begin halfway to top speed and replay with the flag', () => {
+    const sim = createGameSim({ startFast: true });
+    const run = playRun(sim, PRESS, 55, false, autopilotFor(1200));
+    const spec = { ...run.spec, fast: true };
+    expect(replayRun(spec, run.inputs, run.steps)).toEqual({ ok: true, score: run.score });
+    expect(replayRun(run.spec, run.inputs, run.steps)).not.toEqual({ ok: true, score: run.score });
+    const fresh = createGameSim({ startFast: true });
+    fresh.step(PRESS);
+    expect(fresh.getSnapshot().speed).toBeCloseTo(RUNNER.FAST_START_SPEED, 2);
+  });
+
   test('the seed decides the run', () => {
     const run = playRun(createGameSim(), PRESS, 77, false, autopilotFor(1500));
     const other = replayRun({ ...run.spec, seed: 78 }, run.inputs, run.steps);
@@ -128,9 +139,9 @@ describe('replay', () => {
       return [run.steps, run.score, hash];
     });
     expect(fingerprint).toEqual([
-      [4028, 807, 4292311508],
-      [4030, 807, 315166716],
-      [4004, 801, 2902783375],
+      [4024, 806, 1361302909],
+      [4007, 802, 3439244483],
+      [4063, 816, 2206223095],
     ]);
   });
 });

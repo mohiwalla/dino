@@ -16,12 +16,23 @@ export const RUNNER = {
   MAX_SPEED: 13,
   /** Added to the speed every frame until MAX_SPEED. */
   ACCELERATION: 0.001,
+  /** "Start fast" runs begin halfway to MAX_SPEED (where a normal run is about a minute in). */
+  FAST_START_SPEED: 9.5,
   /** Chrome multiplies speed by this on mobile-width screens. We leave it off (see GameSimOptions.mobile). */
   MOBILE_SPEED_COEFFICIENT: 1.2,
   GAP_COEFFICIENT: 0.6,
   MAX_GAP_COEFFICIENT: 1.5,
-  /** No obstacles for this long after a run starts (ms). */
-  CLEAR_TIME: 3000,
+  /**
+   * No obstacles for this long after a run starts (ms). Chrome waits 3000; we wait less and
+   * spawn the run's first obstacle at FIRST_SPAWN_X, so it arrives in about half the time.
+   * A ranked run's seed must reach the browser within this window (src/net/ranked.ts).
+   */
+  CLEAR_TIME: 1200,
+  /**
+   * Chrome's gap rule (width * speed + minGap) spreads obstacles out as the run speeds up. We
+   * scale its speed term down linearly to this share at MAX_SPEED, so fast stretches stay busy.
+   */
+  GAP_SPEED_SCALE_AT_MAX: 0.7,
   /** After a crash, restart input is ignored for this long (ms). */
   GAMEOVER_CLEAR_TIME: 750,
   MAX_OBSTACLE_LENGTH: 3,
@@ -32,6 +43,8 @@ export const RUNNER = {
    * (fog hides the pop-in) and the Chrome gap rule is applied against this edge instead.
    */
   SPAWN_X: 1100,
+  /** A run's first obstacle spawns (rising out of the ground) this close instead. */
+  FIRST_SPAWN_X: 650,
   /** Obstacles are dropped once their right edge is behind this x. */
   DESPAWN_X: -220,
 } as const;
@@ -220,6 +233,8 @@ export const STORAGE_KEYS = {
   /** "0" when the player hid the team board. */
   showBoard: 'dino3d.showBoard',
   mode: 'dino3d.mode',
+  /** "1" when runs start fast. */
+  startFast: 'dino3d.startFast',
   /** The last leaderboard and account seen, shown at once on the next load. */
   board: 'dino3d.board',
 } as const;

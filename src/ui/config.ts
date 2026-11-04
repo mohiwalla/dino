@@ -123,15 +123,23 @@ export function createConfigPanel(
   const volumeText = add(sound, layoutText('100'), 'hud-config-value', 'small');
 
   // ── Leaderboard ──
-  const rankedRow = row('RANKED RUNS');
-  const rankedSwitch = el('button', 'hud-switch', rankedRow);
-  rankedSwitch.type = 'button';
-  rankedSwitch.setAttribute('role', 'switch');
-  rankedSwitch.setAttribute('aria-label', 'Ranked runs');
-  rankedSwitch.addEventListener('mousedown', (e) => e.preventDefault());
-  rankedSwitch.addEventListener('click', () => settings && emitSettings({ ranked: !settings.ranked }));
-  el('span', 'hud-switch-knob', rankedSwitch);
-  const rankedText = add(rankedRow, layoutText('ON'), 'hud-config-value', 'small');
+  /** An on/off switch with ON / OFF beside it, for a boolean setting. */
+  const toggle = (label: string, ariaLabel: string, key: 'ranked' | 'startFast') => {
+    const parent = row(label);
+    const sw = el('button', 'hud-switch', parent);
+    sw.type = 'button';
+    sw.setAttribute('role', 'switch');
+    sw.setAttribute('aria-label', ariaLabel);
+    sw.addEventListener('mousedown', (e) => e.preventDefault());
+    sw.addEventListener('click', () => settings && emitSettings({ [key]: !settings[key] }));
+    el('span', 'hud-switch-knob', sw);
+    const text = add(parent, layoutText('ON'), 'hud-config-value', 'small');
+    return (on: boolean) => {
+      sw.setAttribute('aria-checked', String(on));
+      text.setMask(layoutText(on ? 'ON' : 'OFF'));
+    };
+  };
+  const setRanked = toggle('RANKED RUNS', 'Ranked runs', 'ranked');
   const board = radio(row('TEAM BOARD'), 'Team board', [[true, 'SHOWN'], [false, 'HIDDEN']], (on) => emitSettings({ showBoard: on }));
 
   // ── Modes ──
@@ -140,10 +148,11 @@ export function createConfigPanel(
     'Mode',
     [
       ['classic', 'CLASSIC'],
-      ['funny', 'FUNNY · SOON'],
+      ['funny', 'FUNNY'],
     ] as const satisfies readonly (readonly [GameMode, string])[],
     (mode) => emitSettings({ mode }),
   );
+  const setStartFast = toggle('START FAST', 'Start fast', 'startFast');
 
   // Sign out sits alone at the bottom, away from the everyday settings.
   const footer = el('div', 'hud-config-footer', panel);
@@ -179,11 +188,11 @@ export function createConfigPanel(
       if (document.activeElement !== volume) volume.value = String(percent);
       volumeText.setMask(layoutText(String(next.muted ? 0 : percent)));
 
-      rankedSwitch.setAttribute('aria-checked', String(next.ranked));
-      rankedText.setMask(layoutText(next.ranked ? 'ON' : 'OFF'));
+      setRanked(next.ranked);
+      setStartFast(next.startFast);
       // The board only shows with ranked runs on.
       board.set(next.showBoard && next.ranked, () => !next.ranked);
-      modes.set(next.mode, (mode) => mode === 'funny');
+      modes.set(next.mode);
     },
 
     focus() {

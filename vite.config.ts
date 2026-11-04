@@ -15,7 +15,9 @@ function serviceWorker(): Plugin {
         hash.update(name).update(out.type === 'chunk' ? out.code : out.source);
       }
       // Public-dir files are copied after the bundle, so list them explicitly.
-      const precache = ['./', ...files.filter((f) => f !== 'index.html' && f !== 'admin.html'), 'favicon.ico'];
+      // Funny mode's crash clips (1.4 MB) are cached by the service worker as they are fetched instead.
+      const crashClips = new Set(Object.values(bundle).filter((f) => f.type === 'asset' && f.originalFileNames.some((n) => n.includes('audio/crash/'))).map((f) => f.fileName));
+      const precache = ['./', ...files.filter((f) => f !== 'index.html' && f !== 'admin.html' && !crashClips.has(f)), 'favicon.ico'];
       const source = readFileSync(new URL('./sw/sw.js', import.meta.url), 'utf8')
         .replace('__VERSION__', JSON.stringify(hash.digest('hex').slice(0, 12)))
         .replace('__PRECACHE__', JSON.stringify(precache));

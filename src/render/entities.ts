@@ -7,6 +7,7 @@ import type { Box, Entities, GameEvent, GameSnapshot, ModelLibrary } from '../ty
 import { createDebugBoxes } from './entities-debug';
 import { createEffects } from './entities-effects';
 import { createObstaclePool, obstacleX } from './entities-obstacles';
+import { createSmoke } from './entities-smoke';
 import { createTrexView } from './entities-trex';
 
 /** Longer frames (tab switches, breakpoints) are clamped so springs and particles stay sane. */
@@ -21,7 +22,9 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
   const obstacles = createObstaclePool(models);
   const effects = createEffects(models.materials[SLOT.INK - 1]);
   const debug = createDebugBoxes();
-  scene.add(trex.root, obstacles.root, effects.mesh, debug.lines);
+  const smoke = createSmoke();
+  scene.add(trex.root, obstacles.root, effects.mesh, smoke.points, debug.lines);
+  let funny = false;
   let debugOn = false;
   let night = -1;
 
@@ -56,6 +59,7 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
     switch (e.type) {
       case 'jump':
         trex.jump();
+        if (funny) smoke.jump();
         break;
       case 'land':
         trex.land();
@@ -86,6 +90,7 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
       trex.update(prev, curr, alpha, dt, fresh);
       obstacles.update(prev, curr, fresh ? 1 : alpha, dt, fresh);
       effects.update(curr, trex.root.position, dt);
+      smoke.update(curr, trex.root.position, dt);
       if (debugOn) drawDebug(prev, curr, alpha, fresh);
     },
 
@@ -98,10 +103,16 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
       debug.lines.visible = on;
     },
 
+    setFunny(on) {
+      funny = on;
+      trex.setFunny(on);
+    },
+
     dispose() {
       trex.dispose();
       obstacles.dispose();
       effects.dispose();
+      smoke.dispose();
       debug.dispose();
     },
   };

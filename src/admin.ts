@@ -14,6 +14,7 @@ interface AdminRun {
   status: string;
   flags: string | null;
   mobile: number;
+  fast: number;
   steps: number;
   started_at: number;
   finished_at: number | null;
@@ -84,7 +85,7 @@ function runsTable(runs: AdminRun[]): HTMLElement {
       h('td', { className: 'num', textContent: r.score === null ? '–' : String(r.score) }),
       h('td', {}, h('span', { className: `status status-${r.status}`, textContent: r.status })),
       h('td', { className: 'flags', textContent: r.flags ?? '' }),
-      h('td', { textContent: `${duration(r.steps)}${r.mobile ? ' · mobile' : ''}` }),
+      h('td', { textContent: `${duration(r.steps)}${r.fast ? ' · fast start' : ''}${r.mobile ? ' · mobile' : ''}` }),
       h('td', { textContent: when(r.finished_at) }),
       actions,
     );

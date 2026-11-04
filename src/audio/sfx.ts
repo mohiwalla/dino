@@ -7,6 +7,7 @@
 
 import { STORAGE_KEYS } from '../config';
 import type { Sfx, SfxName } from '../types';
+import { createFunnyClips, scheduleFart, scheduleSlide } from './funny';
 
 const MASTER_GAIN = 0.25;
 const ATTACK = 0.004;
@@ -26,7 +27,7 @@ interface Note {
 }
 
 /** Note lists per sound; times and pitches tuned by ear against Chrome's samples. */
-export const SFX_NOTES: Readonly<Record<SfxName, readonly Note[]>> = {
+export const SFX_NOTES: Readonly<Record<'jump' | 'milestone' | 'crash', readonly Note[]>> = {
   jump: [{ type: 'square', at: 0, dur: 0.06, freq: 780, freqEnd: 1040, gain: 0.32, lowpass: 5200 }],
   milestone: [
     { type: 'square', at: 0, dur: 0.075, freq: 1318.5, gain: 0.26, lowpass: 6000 },
@@ -40,6 +41,8 @@ export const SFX_NOTES: Readonly<Record<SfxName, readonly Note[]>> = {
 
 /** Schedule one sound into any (online or offline) context. Exported for the dev check page. */
 export function scheduleSfx(ctx: BaseAudioContext, destination: AudioNode, name: SfxName, t0: number): void {
+  if (name === 'fart') return scheduleFart(ctx, destination, t0);
+  if (name === 'slide') return scheduleSlide(ctx, destination, t0);
   for (const n of SFX_NOTES[name]) {
     const start = t0 + n.at;
     const end = start + n.dur;
@@ -113,6 +116,7 @@ export function createSfx(): Sfx {
   let muted = readMuted();
   let volume = readVolume();
   let ctx: AudioContext | null = null;
+  const clips = createFunnyClips();
   let master: GainNode | null = null;
   let failed = false;
 
@@ -158,7 +162,12 @@ export function createSfx(): Sfx {
     play(name: SfxName): void {
       if (muted || !ctx || !master || ctx.state !== 'running') return;
       try {
-        scheduleSfx(ctx, master, name, ctx.currentTime + 0.005);
+        const t0 = ctx.currentTime + 0.005;
+        if (name === 'fart' || name === 'slide') {
+          clips.load(ctx);
+          if (clips.play(ctx, master, name, t0)) return;
+        }
+        scheduleSfx(ctx, master, name, t0);
       } catch {
         // A broken audio stack must never take the game down.
       }
@@ -185,5 +194,14 @@ export function createSfx(): Sfx {
     },
 
     unlock,
+
+    stopFunny() {
+      clips.stopCrash();
+    },
+
+    preloadFunny() {
+      const c = ensureContext();
+      if (c) clips.load(c);
+    },
   };
 }

@@ -23,6 +23,12 @@ const CRASH_TILT = 0.06;
 const CRASH_KICK = 2.4;
 const TILT_OMEGA = 18;
 const TILT_ZETA = 0.35;
+/** Funny mode's crash: a full spin, then flat on its back with a bouncy settle. */
+const FLOP_TILT = Math.PI / 2;
+const FLOP_KICK = 9;
+const FLOP_OMEGA = 11;
+const FLOP_ZETA = 0.28;
+const SPIN_SECONDS = 0.45;
 
 interface Spring {
   x: number;
@@ -47,6 +53,7 @@ export interface TrexView {
   land(): void;
   crash(): void;
   restart(): void;
+  setFunny(on: boolean): void;
   dispose(): void;
 }
 
@@ -65,6 +72,9 @@ export function createTrexView(models: ModelLibrary): TrexView {
   const tilt: Spring = { x: 0, v: 0 };
   let lean = 0;
   let crashed = false;
+  let funny = false;
+  /** Seconds into the funny crash spin, or -1 when not spinning. */
+  let spin = -1;
 
   function setFrame(next: TrexFrame): void {
     if (next === frame) return;
@@ -76,7 +86,9 @@ export function createTrexView(models: ModelLibrary): TrexView {
     const playing = curr.phase === 'playing';
     stepSpring(squash, 0, SQUASH_OMEGA, SQUASH_ZETA, dt);
     squash.x = THREE.MathUtils.clamp(squash.x, -MAX_SQUASH, MAX_SQUASH);
-    stepSpring(tilt, crashed ? CRASH_TILT : 0, TILT_OMEGA, TILT_ZETA, dt);
+    if (funny && crashed) stepSpring(tilt, FLOP_TILT, FLOP_OMEGA, FLOP_ZETA, dt);
+    else stepSpring(tilt, crashed ? CRASH_TILT : 0, TILT_OMEGA, TILT_ZETA, dt);
+    if (spin >= 0) spin = spin + dt >= SPIN_SECONDS ? -1 : spin + dt;
 
     const speedT = THREE.MathUtils.clamp((curr.speed - RUNNER.SPEED) / (RUNNER.MAX_SPEED - RUNNER.SPEED), 0, 1);
     const leanTarget = playing ? -MAX_LEAN * speedT * speedT : 0;
@@ -100,6 +112,10 @@ export function createTrexView(models: ModelLibrary): TrexView {
       const s = squash.x;
       pivot.scale.set(1 - s * 0.5, 1 + s, 1 - s * 0.5);
       pivot.rotation.z = lean + tilt.x;
+      // Lying down rotates the model about its feet; lift it so it rests on the ground.
+      pivot.position.y = funny ? halfW * Math.max(0, Math.sin(tilt.x)) : 0;
+      const p = spin < 0 ? 0 : spin / SPIN_SECONDS;
+      pivot.rotation.y = p * (2 - p) * Math.PI * 2;
     },
 
     jump() {
@@ -113,11 +129,22 @@ export function createTrexView(models: ModelLibrary): TrexView {
     crash() {
       crashed = true;
       squash.v += CRASH_SQUASH;
-      tilt.v += CRASH_KICK;
+      tilt.v += funny ? FLOP_KICK : CRASH_KICK;
+      if (funny) spin = 0;
     },
 
     restart() {
       crashed = false;
+      spin = -1;
+      // From a funny flop, back on its feet at once rather than springing up from flat.
+      if (tilt.x > CRASH_TILT * 2) {
+        tilt.x = 0;
+        tilt.v = 0;
+      }
+    },
+
+    setFunny(on) {
+      funny = on;
     },
 
     dispose() {

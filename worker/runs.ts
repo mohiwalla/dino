@@ -20,6 +20,7 @@ interface OpenRun {
   seed: number;
   mobile: number;
   after_crash: number;
+  fast: number;
   started_at: number;
   steps: number;
   inputs: string;
@@ -30,7 +31,7 @@ function playable(user: User): void {
   if (user.banned) throw new HttpError(403, 'banned from the leaderboard');
 }
 
-/** POST /api/runs {mobile, afterCrash, simVersion} -> {id, seed} */
+/** POST /api/runs {mobile, afterCrash, fast, simVersion} -> {id, seed} */
 export async function startRun(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   playable(user);
@@ -49,16 +50,16 @@ export async function startRun(request: Request, env: Env): Promise<Response> {
     // One open run per player: starting a new one abandons the last.
     env.DB.prepare("UPDATE runs SET status = 'abandoned' WHERE user_id = ? AND status = 'open'").bind(user.id),
     env.DB.prepare(
-      `INSERT INTO runs (id, user_id, seed, mobile, after_crash, sim_version, started_at, beats, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
-    ).bind(id, user.id, seed, body.mobile === true ? 1 : 0, body.afterCrash === true ? 1 : 0, SIM_VERSION, now, JSON.stringify(beats)),
+      `INSERT INTO runs (id, user_id, seed, mobile, after_crash, fast, sim_version, started_at, beats, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+    ).bind(id, user.id, seed, body.mobile === true ? 1 : 0, body.afterCrash === true ? 1 : 0, body.fast === true ? 1 : 0, SIM_VERSION, now, JSON.stringify(beats)),
   ]);
   return json({ id, seed });
 }
 
 async function openRun(env: Env, user: User, id: string): Promise<OpenRun> {
   const run = await env.DB.prepare(
-    "SELECT id, user_id, seed, mobile, after_crash, started_at, steps, inputs, beats FROM runs WHERE id = ? AND status = 'open'",
+    "SELECT id, user_id, seed, mobile, after_crash, fast, started_at, steps, inputs, beats FROM runs WHERE id = ? AND status = 'open'",
   )
     .bind(id)
     .first<OpenRun>();
@@ -103,6 +104,7 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
     seed: run.seed,
     mobile: run.mobile === 1,
     afterCrash: run.after_crash === 1,
+    fast: run.fast === 1,
     steps: next.steps,
     inputs: next.inputs,
     beats: next.beats,
@@ -134,11 +136,11 @@ async function bestScore(env: Env, userId: string): Promise<number | null> {
 export async function getRun(request: Request, env: Env, id: string): Promise<Response> {
   const user = await requireUser(request, env);
   const run = await env.DB.prepare(
-    `SELECT r.id, r.seed, r.mobile, r.after_crash, r.steps, r.inputs, r.score, r.status, r.user_id, u.name
+    `SELECT r.id, r.seed, r.mobile, r.after_crash, r.fast, r.steps, r.inputs, r.score, r.status, r.user_id, u.name
      FROM runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
   )
     .bind(id)
-    .first<{ id: string; seed: number; mobile: number; after_crash: number; steps: number; inputs: string; score: number | null; status: string; user_id: string; name: string }>();
+    .first<{ id: string; seed: number; mobile: number; after_crash: number; fast: number; steps: number; inputs: string; score: number | null; status: string; user_id: string; name: string }>();
   const visible = run && run.status !== 'open' && run.status !== 'abandoned' && (run.status === 'ok' || user.admin || run.user_id === user.id);
   if (!run || !visible) throw new HttpError(404, 'no such run');
   return json({
@@ -149,6 +151,7 @@ export async function getRun(request: Request, env: Env, id: string): Promise<Re
     seed: run.seed,
     mobile: run.mobile === 1,
     afterCrash: run.after_crash === 1,
+    fast: run.fast === 1,
     steps: run.steps,
     inputs: JSON.parse(run.inputs),
   });

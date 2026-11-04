@@ -10,6 +10,7 @@ import {
   dir,
   distanceOf,
   FOV,
+  framing,
   fitFraming,
   FRAMING_LENGTH,
   type Framing,
@@ -23,6 +24,7 @@ import {
   TY,
   TZ,
   up,
+  YAW,
 } from './camera-framing';
 
 const SWOOP_MS = 1500;
@@ -38,6 +40,17 @@ const SHAKE_AMOUNT = 0.022;
 const MAX_DT_MS = 100;
 /** Fraction of the T-Rex's height the title close-up follows, so the first jump stays in frame mid-swoop. */
 const TITLE_FOLLOW = 1;
+/**
+ * Funny mode's crash close-up: once the T-Rex has flopped onto its back, the camera eases in on
+ * its face (from the mode's title angle), a little looser than the title close-up.
+ */
+const FACE_X = -10;
+// Aimed above the face, so the face sits below the game-over text in the lower half.
+const FACE_Y = 48;
+const FACE_SIZE = 66;
+const FACE_FOV = 30;
+const FACE_DELAY_MS = 250;
+const FACE_MS = 900;
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -81,6 +94,17 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
   let swoopMs = -1;
   let shakeMs = 0;
   let shakeClock = 0;
+  let funny = false;
+  /** ms since a funny crash, or -1; faceBlend eases 0 -> 1 toward the face close-up. */
+  let faceMs = -1;
+  let faceBlend = 0;
+  const face = {} as Record<CameraMode, Framing>;
+  for (const m of Object.keys(TITLES) as CameraMode[]) {
+    const t = TITLES[m].base;
+    face[m] = framing(FACE_X, FACE_Y, 0, 0, FACE_SIZE, FACE_FOV);
+    face[m][YAW] = t[YAW];
+    face[m][PITCH] = t[PITCH];
+  }
 
   function refit(): void {
     for (const m of Object.keys(MODES) as CameraMode[]) {
@@ -96,6 +120,17 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
     desired[TY] += (TITLE_FOLLOW + (MODES[mode].follow - TITLE_FOLLOW) * titleBlend) * Math.max(0, trexY);
     if (mode === 'cinematic') widenFov(desired, SPEED_FOV * speedT);
     if (mode === 'chase') desired[PITCH] += SPEED_PITCH * speedT;
+    if (faceBlend > 0) mixFraming(desired, desired, face[mode], faceBlend);
+  }
+
+  function advanceFace(curr: GameSnapshot, dtMs: number): void {
+    if (curr.phase !== 'crashed' || faceMs < 0) {
+      faceMs = -1;
+      faceBlend = 0;
+      return;
+    }
+    faceMs += dtMs;
+    faceBlend = easeInOutCubic(THREE.MathUtils.clamp((faceMs - FACE_DELAY_MS) / FACE_MS, 0, 1));
   }
 
   /** Widen the fov in place: the camera keeps its distance, so the view genuinely gets wider. */
@@ -163,6 +198,10 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       mode = next;
     },
 
+    setFunny(on) {
+      funny = on;
+    },
+
     resize(width, height) {
       aspect = Math.max(1e-3, width) / Math.max(1, height);
       camera.aspect = aspect;
@@ -173,6 +212,7 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
     update(curr, trex, dtMs) {
       const dt = Math.min(Math.max(dtMs, 0), MAX_DT_MS);
       advanceSwoop(curr, dt);
+      advanceFace(curr, dt);
       computeDesired(curr, trex.position.y);
       if (!initialized) {
         current.set(desired);
@@ -190,6 +230,7 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
         else if (e.type === 'crash' && !reducedMotion?.matches) {
           shakeMs = SHAKE_MS;
           shakeClock = 0;
+          if (funny) faceMs = 0;
         }
       }
     },

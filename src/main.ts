@@ -146,13 +146,18 @@ function main(): void {
     muted: sfx.muted,
     ranked: readStorage(STORAGE_KEYS.ranked) !== '0',
     showBoard: readStorage(STORAGE_KEYS.showBoard) !== '0',
-    mode: 'classic',
+    startFast: readStorage(STORAGE_KEYS.startFast) === '1',
+    mode: readStorage(STORAGE_KEYS.mode) === 'funny' ? 'funny' : 'classic',
   };
+  sim.setStartFast(settings.startFast);
   /** While the config panel is open the game is frozen and gameplay input is dropped. */
   let configOpen = false;
   const hudCtx: HudContext = { cameraMode: rig.mode, settings, configOpen, dark, touch: input.touch, fps: null };
   applyPageTheme(dark);
   entities.setDebug(debug);
+  entities.setFunny(settings.mode === 'funny');
+  rig.setFunny(settings.mode === 'funny');
+  if (settings.mode === 'funny') sfx.preloadFunny();
 
   function resize(): void {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -177,6 +182,7 @@ function main(): void {
   const ranked = createRanked({
     sim: () => sim,
     mobile,
+    fast: () => settings.startFast,
     rankable: () => settings.ranked && !replayId && !autoplay && seed === null && !debug,
     onView: (view) => {
       board = view;
@@ -214,7 +220,16 @@ function main(): void {
       if (!change.ranked) ranked.forfeit();
     }
     if (change.showBoard !== undefined) writeStorage(STORAGE_KEYS.showBoard, change.showBoard ? '1' : '0');
-    if (change.mode !== undefined) writeStorage(STORAGE_KEYS.mode, change.mode);
+    if (change.startFast !== undefined) {
+      writeStorage(STORAGE_KEYS.startFast, change.startFast ? '1' : '0');
+      sim.setStartFast(change.startFast); // from the next run on
+    }
+    if (change.mode !== undefined) {
+      writeStorage(STORAGE_KEYS.mode, change.mode);
+      entities.setFunny(change.mode === 'funny');
+      rig.setFunny(change.mode === 'funny');
+      if (change.mode === 'funny') sfx.preloadFunny();
+    }
   }
 
   /** Opening the panel mid-run pauses it; the player resumes from the pause screen. */
@@ -290,10 +305,11 @@ function main(): void {
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
       frameEvents.push(e);
-      if (e.type === 'jump') sfx.play('jump');
+      if (e.type === 'jump') sfx.play(settings.mode === 'funny' ? 'fart' : 'jump');
+      else if (e.type === 'start' || e.type === 'restart') sfx.stopFunny();
       else if (e.type === 'milestone') sfx.play('milestone');
       else if (e.type === 'crash') {
-        sfx.play('crash');
+        sfx.play(settings.mode === 'funny' ? 'slide' : 'crash');
         if (!replay) writeStorage(STORAGE_KEYS.highScore, String(curr.highScore));
       }
     }

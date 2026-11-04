@@ -4,6 +4,7 @@ import { hitsObstacle, obstacleCollisionBoxes, TREX_DUCKING_BOXES, TREX_RUNNING_
 import { createGameSim } from '../src/sim/game';
 import {
   createObstacleField,
+  gapSpeedScale,
   isDuplicate,
   spawnObstacle,
   updateObstacles,
@@ -31,7 +32,8 @@ describe('spawning', () => {
     expect(spawn).toBeDefined();
     const after = sim.getSnapshot();
     expect(after.obstacles.length).toBe(1);
-    expect(after.obstacles[0].x).toBe(RUNNER.SPAWN_X);
+    // A run's first obstacle comes in closer than the rest.
+    expect(after.obstacles[0].x).toBe(RUNNER.FIRST_SPAWN_X);
   });
 
   const SPEEDS = [6, 6.99, 7, 8.49, 8.5, 10, 13];
@@ -56,7 +58,7 @@ describe('spawning', () => {
         expect(o.width).toBe(type.width * o.size);
         expect(o.height).toBe(type.height);
         expect(o.x).toBe(RUNNER.SPAWN_X);
-        const minGap = Math.round(o.width * speed + type.minGap * RUNNER.GAP_COEFFICIENT);
+        const minGap = Math.round(o.width * speed * gapSpeedScale(speed) + type.minGap * RUNNER.GAP_COEFFICIENT);
         expect(Number.isInteger(o.gap)).toBe(true);
         expect(o.gap).toBeGreaterThanOrEqual(minGap);
         expect(o.gap).toBeLessThanOrEqual(Math.round(minGap * RUNNER.MAX_GAP_COEFFICIENT));

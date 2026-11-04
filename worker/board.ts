@@ -11,14 +11,15 @@ interface BoardRow {
   name: string;
   score: number;
   mobile: number;
+  fast: number;
   run_id: string;
   finished_at: number;
 }
 
 /** Each unbanned player's best ok run, best first; ties go to whoever got there first. */
 const BEST_RUNS = `
-  SELECT user_id, name, score, mobile, run_id, finished_at FROM (
-    SELECT r.user_id, u.name, r.score, r.mobile, r.id AS run_id, r.finished_at,
+  SELECT user_id, name, score, mobile, fast, run_id, finished_at FROM (
+    SELECT r.user_id, u.name, r.score, r.mobile, r.fast, r.id AS run_id, r.finished_at,
            ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.score DESC, r.finished_at ASC) AS n
     FROM runs r JOIN users u ON u.id = r.user_id
     WHERE r.status = 'ok' AND u.banned = 0
@@ -35,7 +36,7 @@ export async function boardRank(env: Env, userId: string): Promise<number | null
   return i < 0 ? null : i + 1;
 }
 
-/** GET /api/leaderboard -> {entries: [{rank, name, score, mobile, runId, me}], me: {rank, score} | null, players} */
+/** GET /api/leaderboard -> {entries: [{rank, name, score, mobile, fast, runId, me}], me: {rank, score} | null, players} */
 export async function leaderboard(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const rows = await bestRuns(env);
@@ -45,6 +46,7 @@ export async function leaderboard(request: Request, env: Env): Promise<Response>
     name: r.name,
     score: r.score,
     mobile: r.mobile === 1,
+    fast: r.fast === 1,
     runId: r.run_id,
     me: r.user_id === user.id,
   });
@@ -66,7 +68,7 @@ export async function adminRuns(request: Request, env: Env, url: URL): Promise<R
   const status = url.searchParams.get('status') ?? 'review';
   const where = status === 'all' ? "r.status NOT IN ('open', 'abandoned')" : 'r.status = ?';
   const query = env.DB.prepare(
-    `SELECT r.id, u.name, u.email, r.score, r.status, r.flags, r.mobile, r.steps, r.started_at, r.finished_at
+    `SELECT r.id, u.name, u.email, r.score, r.status, r.flags, r.mobile, r.fast, r.steps, r.started_at, r.finished_at
      FROM runs r JOIN users u ON u.id = r.user_id WHERE ${where} ORDER BY r.finished_at DESC LIMIT 200`,
   );
   return json({ runs: (await (status === 'all' ? query : query.bind(status)).all()).results });

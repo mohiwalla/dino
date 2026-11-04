@@ -2,7 +2,7 @@
 // streams it up while they play, and turns the server's verdict into what the HUD shows.
 //
 // Every run asks the server for an obstacle seed the moment it starts. The seed has to arrive
-// before the first obstacle spawns (STEPS.CLEAR, 3 s in); a run that started without one just
+// before the first obstacle spawns (STEPS.CLEAR, 1.2 s in); a run that started without one just
 // isn't ranked. While a ranked run is going the browser "beats" every BEAT_MS, and on pause
 // and resume, so the server can hold the step count against its own clock (worker/verify.ts).
 
@@ -21,6 +21,8 @@ export interface RankedOptions {
   /** The sim being played (main.ts swaps it for replays). */
   sim: () => GameSim;
   mobile: boolean;
+  /** Whether runs start fast (read when each run starts; the sim already uses the same setting). */
+  fast: () => boolean;
   /** False while runs can't be ranked (ranking off, autopilot, ?seed=, a replay). */
   rankable: () => boolean;
   onView: (view: BoardView) => void;
@@ -91,10 +93,11 @@ export function createRanked(opts: RankedOptions): Ranked {
       name: e.name,
       score: e.score,
       mobile: e.mobile,
+      fast: e.fast,
       me: e.me,
     }));
     if (board?.me && board.me.rank > BOARD_ROWS) {
-      entries.push({ rank: board.me.rank, name: account?.name ?? '', score: board.me.score, mobile: false, me: true });
+      entries.push({ rank: board.me.rank, name: account?.name ?? '', score: board.me.score, mobile: false, fast: false, me: true });
     }
     let shownNote = note;
     if (!shownNote && account?.banned) shownNote = 'BANNED FROM THE BOARD';
@@ -192,6 +195,7 @@ export function createRanked(opts: RankedOptions): Ranked {
 
   function begin(afterCrash: boolean, first: InputFrame): void {
     opts.sim().setObstacleRandom(null);
+    const fast = opts.fast();
     const r: Run = { recorder: createInputRecorder(), afterCrash, state: 'starting', id: null, unsent: [], sending: null, beatAgain: false, timer: 0 };
     r.recorder.record(first);
     run = r;
@@ -202,7 +206,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       return;
     }
     finishing
-      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, simVersion: SIM_VERSION }))
+      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, fast, simVersion: SIM_VERSION }))
       .then(({ id, seed }) => {
         if (r.state !== 'starting') return;
         const sim = opts.sim();
