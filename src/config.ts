@@ -214,4 +214,6 @@ export const STORAGE_KEYS = {
   muted: 'dino3d.muted',
   cameraMode: 'dino3d.cameraMode',
   theme: 'dino3d.theme',
+  /** The last leaderboard and account seen, shown at once on the next load. */
+  board: 'dino3d.board',
 } as const;

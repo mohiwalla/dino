@@ -6,6 +6,7 @@
 // isn't ranked. While a ranked run is going the browser "beats" every BEAT_MS, and on pause
 // and resume, so the server can hold the step count against its own clock (worker/verify.ts).
 
+import { STORAGE_KEYS } from '../config';
 import { mulberry32 } from '../sim/rng';
 import { createInputRecorder, SIM_VERSION, type InputRecorder } from '../sim/replay';
 import { STEPS } from '../sim/steps';
@@ -47,6 +48,28 @@ interface Run {
   timer: number;
 }
 
+interface Cached {
+  account: Account | null;
+  board: BoardData | null;
+}
+
+function readCache(): Cached | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.board);
+    return raw ? (JSON.parse(raw) as Cached) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(value: Cached): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.board, JSON.stringify(value));
+  } catch {
+    // Storage disabled: the board just loads from the server each time.
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -81,13 +104,25 @@ export function createRanked(opts: RankedOptions): Ranked {
 
   async function refresh(): Promise<void> {
     try {
-      account = await api.me();
+      // Both at once; the board just fails (401) when signed out.
+      const [me, data] = await Promise.all([api.me(), api.leaderboard().catch(() => null)]);
+      account = me;
+      board = me ? data : null;
       reachable = true;
-      board = account ? await api.leaderboard() : null;
+      writeCache({ account, board });
     } catch {
       // Offline, or a plain static host without the server: no leaderboard UI at all.
       reachable = account !== null;
     }
+    publish();
+  }
+
+  // Show the last known board at once; refresh() replaces it when the server answers.
+  const cached = readCache();
+  if (cached) {
+    account = cached.account;
+    board = cached.board;
+    reachable = true;
     publish();
   }
 
