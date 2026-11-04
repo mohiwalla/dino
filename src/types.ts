@@ -154,7 +154,7 @@ export interface GameSimOptions {
 // ─── Input (src/input) ───────────────────────────────────────────────────────────────────
 
 /** Non-gameplay actions, routed by main.ts. */
-export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme' | 'signIn';
+export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme';
 
 export interface InputController {
   /**
@@ -292,7 +292,7 @@ export interface Hud {
   update(s: GameSnapshot, ctx: HudContext): void;
   setBoard(view: BoardView): void;
   handleEvents(events: GameEvent[]): void;
-  /** HUD buttons (camera, mute, theme, pause, sign in) emit UiActions. */
+  /** HUD buttons (camera, mute, theme, pause) emit UiActions. */
   onAction(cb: (action: UiAction) => void): () => void;
   dispose(): void;
 }

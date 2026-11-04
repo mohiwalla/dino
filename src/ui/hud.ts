@@ -7,6 +7,7 @@ import './hud.css';
 import { PALETTE, SCORE } from '../config';
 import type { BoardView, CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, UiAction } from '../types';
 import { createMask, digitCount, layoutRuns, layoutText, MONO_PITCH, GLYPH_H, writeChar, writeNumber, type PixelMask } from './font';
+import { api } from '../net/api';
 import { CAMERA_ICON, MOON_ICON, PAUSE_ICON, PLAY_ICON, RESTART_ICON, SPEAKER_OFF_ICON, SPEAKER_ON_ICON, SUN_ICON } from './icons';
 import { PixelCanvas, type Tones } from './pixel-canvas';
 
@@ -151,9 +152,12 @@ export function createHud(root: HTMLElement): Hud {
   const pauseBtn = button('hud-btn-pause', 'togglePause');
   const pauseVisible = (v: ViewState): boolean => v.touch && (v.phase === 'playing' || v.phase === 'paused');
   const pauseIcon = add(pauseBtn, PAUSE_ICON, 'hud-icon', 'button', pauseVisible, false);
-  const signInBtn = button('hud-btn-signin', 'signIn');
-  signInBtn.setAttribute('aria-label', 'Sign in with Microsoft to join the team leaderboard');
-  add(signInBtn, layoutText('SIGN IN'), 'hud-btn-label', 'small', always, false);
+  // A plain link, so signing in never depends on a click handler.
+  const signInLink = el('a', 'hud-btn hud-btn-signin', bar);
+  signInLink.href = api.loginUrl(location.pathname + location.search);
+  signInLink.setAttribute('data-ui', '');
+  signInLink.setAttribute('aria-label', 'Sign in with Microsoft to join the team leaderboard');
+  add(signInLink, layoutText('SIGN IN'), 'hud-btn-label', 'small', always, false);
 
   // ── Score ──
   const scoreBox = el('div', 'hud-score', hud);

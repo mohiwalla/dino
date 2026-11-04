@@ -222,9 +222,6 @@ function main(): void {
         entities.setDebug(debug);
         if (debug) ranked.forfeit('DEBUG VIEW');
         break;
-      case 'signIn':
-        location.href = api.loginUrl(location.pathname + location.search);
-        break;
     }
   }
 
