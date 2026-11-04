@@ -282,6 +282,8 @@ export function createHud(root: HTMLElement): Hud {
     lastScore = score;
     lastHigh = high;
     lastHideCurrent = hideCurrent;
+    // Nothing drawn (title screen, no high score yet): the leaderboard moves up into the space.
+    hud.dataset.scoreEmpty = String(high === 0 && hideCurrent);
     const digits = Math.max(SCORE.MAX_DIGITS, digitCount(score), digitCount(high));
     if (digits !== scoreDigits) {
       scoreDigits = digits;

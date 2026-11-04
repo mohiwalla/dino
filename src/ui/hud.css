@@ -92,6 +92,12 @@
   margin-bottom: calc(var(--hud-s) * -1);
 }
 
+@media (min-width: 900px) {
+  .hud[data-score-empty='true'] .hud-board {
+    top: calc(var(--safe-top) + var(--hud-margin));
+  }
+}
+
 @media (max-width: 899px) {
   .hud-board {
     top: auto;
