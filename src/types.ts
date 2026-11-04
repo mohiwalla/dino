@@ -129,6 +129,12 @@ export interface GameSim {
   pause(): void;
   resume(): void;
   setHighScore(score: number): void;
+  /**
+   * RNG for obstacle spawns from now on; null goes back to the shared `random`. Obstacles are
+   * the only randomness a run uses, so a run seeded here before its first spawn (runFrames <=
+   * STEPS.CLEAR) can be replayed exactly from its inputs (src/sim/replay.ts).
+   */
+  setObstacleRandom(random: (() => number) | null): void;
 }
 
 export interface GameSimOptions {
@@ -137,6 +143,8 @@ export interface GameSimOptions {
   highScore?: number;
   /** Touch device: pterodactyls only use OBSTACLES.pterodactyl.yUpMobile heights. */
   mobile?: boolean;
+  /** Start on a game-over screen that accepts a restart at once (replays of restarted runs). */
+  startCrashed?: boolean;
 }
 
 // Factory: src/sim/game.ts      export function createGameSim(opts?: GameSimOptions): GameSim
@@ -146,7 +154,7 @@ export interface GameSimOptions {
 // ─── Input (src/input) ───────────────────────────────────────────────────────────────────
 
 /** Non-gameplay actions, routed by main.ts. */
-export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme';
+export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme' | 'signIn';
 
 export interface InputController {
   /**
@@ -258,10 +266,33 @@ export interface HudContext {
   fps: number | null;
 }
 
+/** One leaderboard row: a player's best verified run. */
+export interface BoardEntry {
+  rank: number;
+  name: string;
+  score: number;
+  mobile: boolean;
+  /** The signed-in player's own row. */
+  me: boolean;
+}
+
+/** What the HUD shows of the team leaderboard (src/net/ranked.ts builds it). */
+export interface BoardView {
+  /** off: no leaderboard server (offline, or a static host), so nothing is shown. */
+  account: 'off' | 'signedOut' | 'signedIn';
+  /** The top rows, plus the player's own row at the end if it is further down. */
+  entries: readonly BoardEntry[];
+  /** A line under the board on the title and game-over screens (the last run's verdict). */
+  note: string;
+  /** A line under the score while a run is going (RANKED, or why it is not). */
+  live: string;
+}
+
 export interface Hud {
   update(s: GameSnapshot, ctx: HudContext): void;
+  setBoard(view: BoardView): void;
   handleEvents(events: GameEvent[]): void;
-  /** HUD buttons (camera, mute, theme, pause) emit UiActions. */
+  /** HUD buttons (camera, mute, theme, pause, sign in) emit UiActions. */
   onAction(cb: (action: UiAction) => void): () => void;
   dispose(): void;
 }

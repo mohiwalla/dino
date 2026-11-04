@@ -28,6 +28,10 @@
   flex: none;
 }
 
+.hud canvas[hidden] {
+  display: none;
+}
+
 .hud-status {
   position: absolute;
   width: 1px;
@@ -43,6 +47,70 @@
   z-index: 1;
   top: calc(var(--safe-top) + var(--hud-margin));
   right: calc(var(--safe-right) + var(--hud-margin));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--hud-s) * 3);
+}
+
+.hud .hud-live {
+  display: none;
+  opacity: 0.7;
+}
+
+.hud[data-phase='playing'] .hud-live,
+.hud[data-phase='paused'] .hud-live {
+  display: block;
+}
+
+/* ── Leaderboard: a column under the score, or along the bottom on narrower screens ── */
+.hud-board {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--hud-margin) + var(--hud-u) * 16);
+  right: calc(var(--safe-right) + var(--hud-margin));
+  display: none;
+  flex-direction: column;
+  gap: calc(var(--hud-s) * 4);
+}
+
+.hud:not([data-account='off']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
+  display: flex;
+}
+
+.hud-board-rows {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--hud-s) * 2);
+}
+
+.hud-board-title,
+.hud-board-note {
+  opacity: 0.85;
+}
+
+.hud-board-title {
+  margin-bottom: calc(var(--hud-s) * -1);
+}
+
+@media (max-width: 899px) {
+  .hud-board {
+    top: auto;
+    bottom: calc(var(--safe-bottom) + var(--hud-margin));
+    left: 0;
+    right: 0;
+    align-items: center;
+  }
+
+  .hud-board-row:nth-child(n + 6):not(.hud-board-me) {
+    display: none;
+  }
+}
+
+@media (max-height: 539px) {
+  .hud .hud-board-title,
+  .hud .hud-board-row:not(.hud-board-me) {
+    display: none;
+  }
 }
 
 /* ── Buttons ── */
@@ -95,8 +163,13 @@
   opacity: 1;
 }
 
-.hud-btn-pause {
+.hud-btn-pause,
+.hud-btn-signin {
   display: none;
+}
+
+.hud[data-account='signedOut']:is([data-phase='title'], [data-phase='crashed']) .hud-btn-signin {
+  display: flex;
 }
 
 .hud[data-touch='true'][data-phase='playing'] .hud-btn-pause,

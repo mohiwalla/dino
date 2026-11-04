@@ -38,6 +38,7 @@ swoops out to the play framing when the run starts.
 | `?debug=1` | Show collision boxes and an FPS counter. |
 | `?cam=cinematic\|side\|chase` | Starting camera mode (takes priority over the saved one). |
 | `?theme=dark|light` | Starting theme (otherwise the saved choice, then the OS setting). |
+| `?replay=<run id>` | Play back a stored leaderboard run (signed in; see the admin page). |
 
 For tests, `window.__dino` exposes `getSnapshot()`, `advance(n, input?)`, `setAutoplay(on)`,
 `setCameraMode(mode)`, `freeze(on)` (stop real-time stepping, keep rendering), `info` (triangles,
@@ -50,7 +51,9 @@ bun install
 bun run dev        # Vite dev server
 bun run build      # type-check (tsc) + production build into dist/
 bun run preview    # serve dist/
-bun test           # simulation + autopilot tests
+bun test           # simulation, autopilot, replay and run-verification tests
+bun run dev:api    # the leaderboard Worker on :8787 (Vite proxies /api to it)
+bun run deploy     # build, migrate D1, deploy the Worker
 node scripts/playtest.mjs http://localhost:4173/   # headless playtest, screenshots in /tmp/dino-shots/playtest/
 node scripts/shot.mjs <url> <out.png> [options]   # one-off headless screenshots
 node scripts/offline-check.mjs http://localhost:4173/   # loads once, goes offline, reloads and plays
@@ -66,8 +69,45 @@ The `dev/` folder has standalone test pages for each module (`/dev/models.html`,
 - `src/sim/`: the deterministic game simulation and the autopilot.
 - `src/render/`: voxel mesher, models, world (sky, ground, lights, night), entities, camera.
 - `src/ui/`, `src/input/`, `src/audio/`: the pixel HUD, input and sound effects.
+- `src/net/`: the leaderboard API client and ranked-run recording.
 - `src/main.ts`: the fixed-step loop that wires everything together.
+- `worker/`, `migrations/`, `wrangler.jsonc`: the leaderboard server (a Cloudflare Worker with D1).
 
 ## Offline
 
 Production builds register a service worker (`sw/sw.js`, filled in by the plugin in `vite.config.ts`) that precaches every file of the build. After one online visit, the game loads and plays with no network. Each build gets a new cache version, and old caches are deleted. The dev server never registers it.
+
+## Team leaderboard
+
+The game is deployed as one Cloudflare Worker (`wrangler.jsonc`): `/api/*` is the leaderboard
+server in `worker/`, everything else is the Vite build. Players sign in with Microsoft Entra ID.
+The app registration "Dino 3D Leaderboard" is single-tenant, so only Sifars accounts get in.
+The board shows each player's best verified run.
+
+The browser never sends a score. A ranked run works like this:
+
+1. When a run starts, `POST /api/runs` returns a fresh random obstacle seed from the server.
+   The seed has to arrive before the first obstacle spawns (3 s in), or the run isn't ranked.
+2. The browser records every step's input (`src/sim/replay.ts`). Every 10 s, and on pause and
+   resume, it uploads what it has so far with the step count (a "beat").
+3. At the crash it sends the rest. The server replays the whole log in a fresh sim and takes
+   the score from that (`worker/verify.ts`).
+
+The server also checks the run against its own clock and against the autopilot:
+
+- A run that plays steps faster than real time is rejected.
+- These runs go to an admin for review, and stay off the board until approved:
+  - runs slower than real time (slow motion);
+  - runs with more than 3 pauses;
+  - runs whose jumps land on the autopilot's exact step;
+  - runs whose jump holds are all the same length.
+
+Admins (`ADMIN_EMAILS`) use `/admin` to watch runs (`?replay=`), approve or void them, and ban
+players.
+
+`SIM_VERSION` in `src/sim/replay.ts` must be bumped whenever a change alters how runs play out.
+`test/sim-replay.test.ts` fails until it is. The server refuses runs from other versions.
+
+Local development: put `ENTRA_CLIENT_SECRET`, `ORIGINS=http://localhost:5173` and `DEV_LOGIN=1`
+in `.dev.vars` (gitignored), then run `bun run dev:api` next to `bun run dev`.
+`/api/auth/dev?name=Alice` signs in a fake player, and only works when every origin is localhost.

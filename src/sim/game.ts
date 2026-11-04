@@ -4,6 +4,7 @@
 import { RUNNER } from '../config';
 import type { GameEvent, GamePhase, GameSim, GameSimOptions, GameSnapshot, InputFrame } from '../types';
 import { hitsObstacle } from './collision';
+import type { Random } from './rng';
 import { createNight, fadeNight, nightAmount, resetNight, updateNight } from './night';
 import { clearObstacles, createObstacleField, obstacleSnapshot, updateObstacles } from './obstacles';
 import {
@@ -48,15 +49,17 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
   const night = createNight();
   const flash: ScoreFlash = { steps: -1 };
   const events: GameEvent[] = [];
+  /** Obstacle RNG for the current run (a ranked run's server seed); null shares `random`. */
+  let obstacleRandom: Random | null = null;
 
-  let phase: GamePhase = 'title';
+  let phase: GamePhase = opts.startCrashed ? 'crashed' : 'title';
   let frame = 0;
   let runFrames = 0;
   let speed: number = RUNNER.SPEED;
   let distance = 0;
   let score = 0;
   let highScore = clampScore(opts.highScore ?? 0);
-  let crashSteps = 0;
+  let crashSteps = opts.startCrashed ? STEPS.GAMEOVER_CLEAR : 0;
 
   resetTrex(trex, 'waiting', random);
 
@@ -109,7 +112,7 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
     runFrames++;
     emitTrexFlags(controlTrex(trex, jumpPressed, input.jumpHeld, input.duckHeld, speed));
     emitTrexFlags(moveTrex(trex, input.duckHeld));
-    if (runFrames > STEPS.CLEAR) updateObstacles(field, speed, random, mobile, events);
+    if (runFrames > STEPS.CLEAR) updateObstacles(field, speed, obstacleRandom ?? random, mobile, events);
     distance += speed;
     const prevScore = score;
     score = scoreForDistance(distance);
@@ -182,6 +185,9 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
     },
     setHighScore(value: number) {
       highScore = clampScore(value);
+    },
+    setObstacleRandom(r: Random | null) {
+      obstacleRandom = r;
     },
   };
 }

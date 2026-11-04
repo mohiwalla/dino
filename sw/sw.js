@@ -23,13 +23,19 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+const SCOPE_PATH = new URL(self.registration.scope).pathname;
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  // The leaderboard API (and sign-in redirects) always goes to the network.
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
-  // Pages: network first so a new deploy shows up right away, the cached shell when offline.
-  // Query strings (?cam=, ?theme=...) all map to the same shell.
+  // The game page: network first so a new deploy shows up right away, the cached shell when
+  // offline. Query strings (?cam=, ?theme=...) all map to the same shell. Other pages
+  // (admin.html) are online-only.
   if (request.mode === 'navigate') {
+    if (url.pathname !== SCOPE_PATH && url.pathname !== `${SCOPE_PATH}index.html`) return;
     event.respondWith(
       fetch(request)
         .then((response) => {

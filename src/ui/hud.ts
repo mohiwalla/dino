@@ -5,7 +5,7 @@
 
 import './hud.css';
 import { PALETTE, SCORE } from '../config';
-import type { CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, UiAction } from '../types';
+import type { BoardView, CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, UiAction } from '../types';
 import { createMask, digitCount, layoutRuns, layoutText, MONO_PITCH, GLYPH_H, writeChar, writeNumber, type PixelMask } from './font';
 import { CAMERA_ICON, MOON_ICON, PAUSE_ICON, PLAY_ICON, RESTART_ICON, SPEAKER_OFF_ICON, SPEAKER_ON_ICON, SUN_ICON } from './icons';
 import { PixelCanvas, type Tones } from './pixel-canvas';
@@ -47,6 +47,10 @@ const TOUCH_LEGEND: readonly (readonly [string, string])[] = [
 ];
 const SCORE_GAP_SLOTS = 2;
 const FPS_SLOTS = 7;
+/** Leaderboard row: rank and dot, a phone mark for mobile runs, name, space, score. */
+const BOARD_NAME_SLOTS = 10;
+const BOARD_SCORE_SLOT = 3 + 1 + BOARD_NAME_SLOTS + 1;
+const BOARD_ROW_SLOTS = BOARD_SCORE_SLOT + SCORE.MAX_DIGITS;
 
 const always = (): boolean => true;
 
@@ -69,6 +73,30 @@ const NIGHT_BG = hexToRgb(PALETTE.night.bg);
 
 function mix(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t);
+}
+
+/** A name as the pixel font can draw it, in BOARD_NAME_SLOTS: "KAMALJOT SINGH" -> "KAMALJOT S". */
+function boardName(name: string): string {
+  const plain = name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (plain.length <= BOARD_NAME_SLOTS) return plain;
+  const words = plain.split(' ');
+  return (words.length > 1 ? `${words[0]} ${words[words.length - 1][0]}` : plain).slice(0, BOARD_NAME_SLOTS);
+}
+
+function boardRow(rank: number, name: string, score: number, mobile: boolean, tone: number): PixelMask {
+  const mask = createMask(BOARD_ROW_SLOTS * MONO_PITCH - 1, GLYPH_H);
+  writeNumber(mask, rank, 0, 2, false, tone);
+  writeChar(mask, '.', 2, tone);
+  if (mobile) writeChar(mask, '📱', 3, tone);
+  [...boardName(name)].forEach((ch, i) => writeChar(mask, ch, 4 + i, tone));
+  writeNumber(mask, score, BOARD_SCORE_SLOT, SCORE.MAX_DIGITS, true, tone);
+  return mask;
 }
 
 function computeUnits(width: number, height: number, dpr: number): Units {
@@ -123,11 +151,26 @@ export function createHud(root: HTMLElement): Hud {
   const pauseBtn = button('hud-btn-pause', 'togglePause');
   const pauseVisible = (v: ViewState): boolean => v.touch && (v.phase === 'playing' || v.phase === 'paused');
   const pauseIcon = add(pauseBtn, PAUSE_ICON, 'hud-icon', 'button', pauseVisible, false);
+  const signInBtn = button('hud-btn-signin', 'signIn');
+  signInBtn.setAttribute('aria-label', 'Sign in with Microsoft to join the team leaderboard');
+  add(signInBtn, layoutText('SIGN IN'), 'hud-btn-label', 'small', always, false);
 
   // ── Score ──
   const scoreBox = el('div', 'hud-score', hud);
   let scoreMask = createMask(1, GLYPH_H);
   const scoreCanvas = add(scoreBox, scoreMask, 'hud-score-text', 'big');
+  const isRunning = (v: ViewState): boolean => v.phase === 'playing' || v.phase === 'paused';
+  const liveLine = add(scoreBox, layoutText(''), 'hud-live', 'small', isRunning);
+
+  // ── Leaderboard (title and game over) ──
+  const isMenu = (v: ViewState): boolean => v.phase === 'title' || v.phase === 'crashed';
+  const boardBox = el('div', 'hud-board', hud);
+  add(boardBox, layoutText('TEAM BOARD'), 'hud-board-title', 'small', isMenu);
+  const boardRows = el('div', 'hud-board-rows', boardBox);
+  const rowCanvases: PixelCanvas[] = [];
+  const boardNote = add(boardBox, layoutText(''), 'hud-board-note', 'small', isMenu);
+  const boardList = el('ol', 'hud-status', boardBox);
+  let boardKey = '';
 
   // ── Title ──
   const isTitle = (v: ViewState): boolean => v.phase === 'title';
@@ -332,7 +375,33 @@ export function createHud(root: HTMLElement): Hud {
     }
   }
 
+  function setBoard(view: BoardView): void {
+    const key = JSON.stringify(view);
+    if (key === boardKey) return;
+    boardKey = key;
+    hud.dataset.account = view.account;
+    view.entries.forEach((e, i) => {
+      if (!rowCanvases[i]) rowCanvases.push(add(boardRows, createMask(1, GLYPH_H), 'hud-board-row', 'small', isMenu));
+      rowCanvases[i].setMask(boardRow(e.rank, e.name, e.score, e.mobile, e.me ? 1 : 2));
+      rowCanvases[i].el.classList.toggle('hud-board-me', e.me);
+      rowCanvases[i].el.hidden = false;
+    });
+    for (let i = view.entries.length; i < rowCanvases.length; i++) rowCanvases[i].el.hidden = true;
+    boardNote.setMask(layoutText(view.note));
+    liveLine.setMask(layoutText(view.live));
+    // Screen readers get the board as text.
+    boardList.replaceChildren(
+      ...view.entries.map((e) => {
+        const li = document.createElement('li');
+        li.textContent = `${e.rank}. ${e.name}${e.me ? ' (you)' : ''}: ${e.score}${e.mobile ? ', on mobile' : ''}`;
+        return li;
+      }),
+    );
+  }
+
   return {
+    setBoard,
+
     update(s: GameSnapshot, ctx: HudContext): void {
       measure();
       updateColors(s.night);

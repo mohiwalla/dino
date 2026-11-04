@@ -7,10 +7,23 @@ import { createCameraRig } from './render/camera';
 import { createEntities } from './render/entities';
 import { createModelLibrary } from './render/models';
 import { createWorld } from './render/world';
+import { api, ApiError } from './net/api';
+import { createRanked } from './net/ranked';
 import { autopilot } from './sim/autopilot';
 import { createGameSim } from './sim/game';
+import { createInputCursor, createRunSim } from './sim/replay';
 import { mulberry32 } from './sim/rng';
-import { CAMERA_MODES, type CameraMode, type GameEvent, type GameSnapshot, type HudContext, type InputFrame, type UiAction } from './types';
+import {
+  CAMERA_MODES,
+  type BoardView,
+  type CameraMode,
+  type GameEvent,
+  type GameSim,
+  type GameSnapshot,
+  type HudContext,
+  type InputFrame,
+  type UiAction,
+} from './types';
 import { createHud } from './ui/hud';
 
 /** A single rendered frame never feeds more than this much time to the accumulator. */
@@ -96,13 +109,20 @@ function main(): void {
   const input = createInput();
 
   const seed = params.get('seed');
-  const sim = createGameSim({
+  const mobile = window.matchMedia('(pointer: coarse)').matches;
+  let sim: GameSim = createGameSim({
     random: seed !== null && Number.isFinite(Number(seed)) ? mulberry32(Number(seed)) : undefined,
     highScore: Number(readStorage(STORAGE_KEYS.highScore)) || 0,
-    mobile: window.matchMedia('(pointer: coarse)').matches,
+    mobile,
   });
 
   let autoplay = params.get('autoplay') === '1';
+  /** ?replay=<run id>: plays a stored leaderboard run back (src/sim/replay.ts). */
+  const replayId = params.get('replay');
+  let replay: { next(): InputFrame; left: number } | null = null;
+  /** What the replay shows in place of the leaderboard's lines, once it has loaded (or failed). */
+  let replayLabel: Pick<BoardView, 'note' | 'live'> | null = replayId ? { note: 'LOADING REPLAY', live: '' } : null;
+  let board: BoardView | null = null;
   let debug = params.get('debug') === '1';
   /** Test hook: stop real-time stepping while rendering continues (the camera still settles). */
   let frozen = false;
@@ -140,10 +160,45 @@ function main(): void {
     applyPageTheme(dark);
   }
 
+  function showBoard(): void {
+    if (board) hud.setBoard(replayLabel ? { ...board, ...replayLabel } : board);
+  }
+
+  const ranked = createRanked({
+    sim: () => sim,
+    mobile,
+    blocker: () => (replayId ? 'REPLAY' : autoplay ? 'AUTOPILOT' : seed !== null ? 'FIXED SEED' : debug ? 'DEBUG VIEW' : null),
+    onView: (view) => {
+      board = view;
+      showBoard();
+    },
+  });
+
+  function loadReplay(id: string): void {
+    api
+      .run(id)
+      .then((run) => {
+        sim = createRunSim(run);
+        const cursor = createInputCursor(run.inputs);
+        replay = { next: () => cursor.next(), left: run.steps };
+        curr = prev = sim.getSnapshot();
+        replayLabel = { note: `REPLAY · ${run.name} · ${run.score ?? 0}`, live: `REPLAY · ${run.name}` };
+        showBoard();
+      })
+      .catch((err: unknown) => {
+        replayLabel = { note: err instanceof ApiError && err.status === 401 ? 'SIGN IN TO WATCH REPLAYS' : 'REPLAY NOT FOUND', live: '' };
+        showBoard();
+      });
+  }
+
   function togglePause(): void {
-    if (curr.phase === 'playing') sim.pause();
-    else if (curr.phase === 'paused') sim.resume();
-    else return;
+    if (curr.phase === 'playing') {
+      sim.pause();
+      ranked.paused();
+    } else if (curr.phase === 'paused') {
+      sim.resume();
+      ranked.resumed();
+    } else return;
     autoPaused = false;
     curr = prev = sim.getSnapshot();
   }
@@ -165,6 +220,10 @@ function main(): void {
       case 'toggleDebug':
         debug = !debug;
         entities.setDebug(debug);
+        if (debug) ranked.forfeit('DEBUG VIEW');
+        break;
+      case 'signIn':
+        location.href = api.loginUrl(location.pathname + location.search);
         break;
     }
   }
@@ -173,9 +232,11 @@ function main(): void {
     if (document.visibilityState === 'hidden') {
       if (curr.phase !== 'playing') return;
       sim.pause();
+      ranked.paused();
       autoPaused = true;
     } else if (autoPaused) {
       sim.resume();
+      ranked.resumed();
       autoPaused = false;
     } else return;
     curr = prev = sim.getSnapshot();
@@ -190,14 +251,26 @@ function main(): void {
       else if (e.type === 'milestone') sfx.play('milestone');
       else if (e.type === 'crash') {
         sfx.play('crash');
-        writeStorage(STORAGE_KEYS.highScore, String(curr.highScore));
+        if (!replay) writeStorage(STORAGE_KEYS.highScore, String(curr.highScore));
       }
     }
   }
 
+  function nextInput(manual: InputFrame | null): InputFrame {
+    if (replay && replay.left > 0) {
+      replay.left--;
+      input.sample(); // drop the player's presses while the replay plays
+      return replay.next();
+    }
+    if (replayLabel?.note === 'LOADING REPLAY') return NO_INPUT;
+    return autoplay ? autopilot(curr) : (manual ?? input.sample());
+  }
+
   function step(manual: InputFrame | null): void {
-    const frame = autoplay ? autopilot(curr) : (manual ?? input.sample());
+    const frame = nextInput(manual);
+    const advances = curr.phase !== 'paused';
     const events = sim.step(frame);
+    if (advances) ranked.stepped(frame, events);
     prev = curr;
     curr = sim.getSnapshot();
     collect(events);
@@ -279,7 +352,10 @@ function main(): void {
     __dino: {
       getSnapshot: () => sim.getSnapshot(),
       advance,
-      setAutoplay: (on: boolean) => (autoplay = on),
+      setAutoplay: (on: boolean) => {
+        autoplay = on;
+        if (on) ranked.forfeit('AUTOPILOT');
+      },
       setCameraMode,
       setDark: (on: boolean) => on !== dark && toggleTheme(),
       freeze: (on: boolean) => (frozen = on),
@@ -292,6 +368,7 @@ function main(): void {
     },
   });
 
+  if (replayId) loadReplay(replayId);
   present(0, 0);
   requestAnimationFrame(frame);
 }

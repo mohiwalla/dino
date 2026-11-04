@@ -5,17 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
+    "dev:api": "wrangler d1 migrations apply dino-3d --local && wrangler dev --port 8787 --local-upstream localhost:5173 --upstream-protocol http",
+    "build": "tsc --noEmit && tsc -p worker --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p worker --noEmit",
+    "deploy": "bun run build && wrangler d1 migrations apply dino-3d --remote && wrangler deploy"
   },
   "dependencies": {
     "three": "0.187.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261015.1",
     "@types/three": "0.187.0",
     "playwright": "1.64.1",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "wrangler": "4.151.3"
   }
 }
