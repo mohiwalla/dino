@@ -87,6 +87,18 @@ function extend(run: OpenRun, body: Record<string, unknown>, now: number): { ste
 
 const MAX_LOOK_CHANGES = 2000;
 
+/** A crash clip is one of the game's own files: its path (a full URL is cut down to one), or '' for none. */
+function clipPath(v: unknown): string {
+  if (typeof v !== 'string' || v.length > 300) return '';
+  let path = v;
+  try {
+    if (!v.startsWith('/')) path = new URL(v).pathname;
+  } catch {
+    return '';
+  }
+  return /^\/[\w./-]{1,200}$/.test(path) ? path : '';
+}
+
 /** One LookState's fields (src/types.ts) that are present and well-formed; the rest are dropped. */
 function cleanState(v: unknown): Record<string, unknown> {
   if (!v || typeof v !== 'object') return {};
@@ -121,8 +133,7 @@ function cleanLook(look: unknown, steps: number): string | null {
     hi: Number.isInteger(l.hi) && (l.hi as number) >= 0 ? l.hi : 0,
     crown: l.crown === true,
     fx: Number.isInteger(l.fx) ? (l.fx as number) >>> 0 : 0,
-    // A clip is one of the game's own files.
-    clip: /^\/[\w./-]{1,200}$/.test(text(l.clip, 200)) ? l.clip : '',
+    clip: clipPath(l.clip),
     line: text(l.line, 60),
     move: text(l.move, 20),
   });

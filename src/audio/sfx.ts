@@ -210,7 +210,8 @@ export function createSfx(): Sfx {
           if (clips.play(ctx, master, name, t0)) {
             if (name === 'slide') {
               crashBeats = clips.crashBeats;
-              crashClip = clips.crashClip;
+              // Saved as a path: built clips load from full URLs, which differ between sites.
+              crashClip = new URL(clips.crashClip, location.href).pathname;
             }
             return;
           }
@@ -259,7 +260,8 @@ export function createSfx(): Sfx {
 
     queueCrash(url) {
       const c = ensureContext();
-      if (c) clips.queueCrash(c, url);
+      // A saved path, back to a full URL like the clips' own ('' stays none).
+      if (c) clips.queueCrash(c, url && new URL(url, location.href).href);
     },
 
     seedFarts(seed) {
