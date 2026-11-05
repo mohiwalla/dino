@@ -283,8 +283,22 @@
 }
 
 .hud-btn-pause,
-.hud-btn-signin {
+.hud-btn-signin,
+.hud-btn-exit {
   display: none;
+}
+
+.hud:not([data-replay='off']) .hud-btn-exit {
+  display: flex;
+}
+
+/* Narrow screens have no room for it beside the score: bottom-left, across from the GitHub link. */
+@media (max-width: 700px) {
+  .hud-btn-exit {
+    position: fixed;
+    left: calc(var(--safe-left) + var(--hud-margin) - 10px);
+    bottom: calc(var(--safe-bottom) + var(--hud-margin) - 10px);
+  }
 }
 
 .hud[data-account='signedOut']:is([data-phase='title'], [data-phase='crashed']) .hud-btn-signin {

@@ -262,6 +262,13 @@ export function createHud(root: HTMLElement): Hud {
     b.addEventListener('mousedown', (e) => e.preventDefault());
     return b;
   };
+  // In a replay, the way back to the game (through the page curtain, src/curtain.ts).
+  const exitLink = el('a', 'hud-btn hud-btn-exit', bar);
+  exitLink.href = '/';
+  exitLink.setAttribute('data-ui', '');
+  exitLink.setAttribute('aria-label', 'Exit the replay, back to the game');
+  exitLink.addEventListener('mousedown', (e) => e.preventDefault());
+  add(exitLink, layoutText('EXIT REPLAY'), 'hud-btn-label', 'small', always, false);
   const cameraBtn = button('hud-btn-camera', 'toggleCamera');
   add(cameraBtn, CAMERA_ICON, 'hud-icon', 'button', always, false);
   const cameraLabel = add(cameraBtn, layoutText(CAMERA_LABELS.cinematic), 'hud-btn-label', 'small', always, false);
