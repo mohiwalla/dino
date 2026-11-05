@@ -6,6 +6,17 @@
     <meta name="robots" content="noindex" />
     <title>Dino 3D Admin</title>
     <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64" />
+    <!-- Arriving from another page under its curtain (src/curtain.ts): written back before the first paint. -->
+    <script>
+      try {
+        var curtain = JSON.parse(sessionStorage.getItem('dino3d.curtain'));
+        if (curtain && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          // The T-Rex carries on where it was (its animations start this far in), rather than starting over.
+          document.documentElement.style.setProperty('--curtain-t', curtain.startedAt - Date.now() + 'ms');
+          document.write('<style>' + curtain.css + '</style>' + curtain.html);
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <main id="admin"></main>

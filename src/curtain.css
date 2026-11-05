@@ -1,0 +1,120 @@
+/* Pixel text (src/pixel-text.ts): a mask in the text colour. */
+.px {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  background: currentColor;
+  -webkit-mask: var(--mask) 0 0 / 100% 100% no-repeat;
+  mask: var(--mask) 0 0 / 100% 100% no-repeat;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── The curtain between pages (src/curtain.ts): the game's ink, with its background as the text ── */
+.curtain {
+  --curtain-bg: #535353;
+  --curtain-fg: #f7f7f7;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: var(--curtain-bg);
+  color: var(--curtain-fg);
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+.curtain[data-theme='dark'] {
+  --curtain-bg: #acacac;
+  --curtain-fg: #080808;
+}
+
+.curtain-stage {
+  display: grid;
+  justify-items: center;
+  gap: 28px;
+}
+
+/* The ground line, with the T-Rex running along it and hopping now and then. */
+.curtain-ground {
+  position: relative;
+  width: min(70vw, 560px);
+  height: calc(var(--px) * 2);
+  margin-top: calc(var(--px) * 64);
+  background: currentColor;
+  opacity: 0.9;
+}
+
+/* Only transforms and opacity move, so it stays smooth while the page underneath is busy loading.
+   --curtain-t (set by the next page's head) carries the run on across the switch instead of restarting it. */
+.curtain-track {
+  position: absolute;
+  inset: auto 0 calc(var(--px) * 2);
+  animation: curtain-run 2s linear var(--curtain-t, 0ms) infinite;
+}
+
+.curtain-runner {
+  display: grid;
+  width: max-content;
+  animation: curtain-hop 1s cubic-bezier(0.33, 0, 0.67, 1) var(--curtain-t, 0ms) infinite;
+  will-change: transform;
+}
+
+.curtain-runner > .px {
+  grid-area: 1 / 1;
+}
+
+/* Two running frames, swapped like the game's. */
+.curtain-run2 {
+  animation: curtain-frame 0.2s steps(1, end) var(--curtain-t, 0ms) infinite;
+}
+
+.curtain-run1 {
+  animation: curtain-frame 0.2s steps(1, end) calc(var(--curtain-t, 0ms) - 0.1s) infinite;
+}
+
+@keyframes curtain-frame {
+  50% {
+    visibility: hidden;
+  }
+}
+
+/* Along the line, fading in at the start and out at the end; the track is the line's width, so 100% is its end. */
+@keyframes curtain-run {
+  from {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  8%,
+  88% {
+    opacity: 1;
+  }
+  to {
+    transform: translateX(calc(100% - var(--runner-w)));
+    opacity: 0;
+  }
+}
+
+/* A hop over an imaginary cactus every half run. */
+@keyframes curtain-hop {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  75% {
+    transform: translateY(-80%);
+  }
+}
+
+.curtain-label {
+  opacity: 0.7;
+}

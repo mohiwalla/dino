@@ -38,9 +38,9 @@ describe('spawning', () => {
 
   const SPEEDS = [6, 6.99, 7, 8.49, 8.5, 10, 13];
   for (const speed of SPEEDS) {
-    test(`type / size / gap / duplication rules hold over 4000 spawns at speed ${speed}`, () => {
+    test(`Chrome's type / size / gap / duplication rules hold over 4000 spawns at speed ${speed} (classic runs)`, () => {
       const random = mulberry32(Math.round(speed * 1000));
-      const field = createObstacleField();
+      const field = createObstacleField(true);
       const kinds: ObstacleKind[] = [];
       const sizes = new Map<ObstacleKind, Set<number>>();
       const variants = new Set<number>();
@@ -275,5 +275,50 @@ describe('collision', () => {
     expect(s.phase).toBe('crashed');
     const o = s.obstacles[0];
     expect(hitsObstacle(s.trex.y, false, o.x, o.y, o.width, o.height, o.collisionBoxes)).toBe(true);
+  });
+});
+
+describe('spawning (SIM_VERSION 3 on)', () => {
+  test('one obstacle in five is a pterodactyl, from the start of a run', () => {
+    for (const speed of [6, 9, 13]) {
+      const random = mulberry32(Math.round(speed * 77));
+      const field = createObstacleField();
+      let birds = 0;
+      const N = 20000;
+      for (let i = 0; i < N; i++) if (spawnObstacle(field, speed, random, false).kind === 'pterodactyl') birds++;
+      expect(birds / N).toBeGreaterThan(0.18);
+      expect(birds / N).toBeLessThan(0.22);
+    }
+  });
+
+  test('a pterodactyl at stackY is a stacked pair that only ducking clears', () => {
+    const type = OBSTACLES.pterodactyl;
+    const random = mulberry32(5);
+    const field = createObstacleField();
+    let pairs = 0;
+    for (let i = 0; i < 4000; i++) {
+      const o = spawnObstacle(field, 9, random, false);
+      if (o.kind !== 'pterodactyl') continue;
+      expect(o.size).toBe(o.y === type.stackY ? 2 : 1);
+      if (o.size !== 2) continue;
+      pairs++;
+      expect(o.width).toBe(type.width);
+      expect(o.height).toBe(type.height + type.stackGap);
+      expect(o.collisionBoxes.length).toBe(2 * type.collision.length);
+      // Standing it hits the lower bird; ducking passes under; jumping at any height a jump reaches hits a bird.
+      expect(hitsObstacle(0, false, 0, o.y, o.width, o.height, o.collisionBoxes)).toBe(true);
+      expect(hitsObstacle(0, true, 0, o.y, o.width, o.height, o.collisionBoxes)).toBe(false);
+      for (let y = 1; y <= 70; y++) expect(hitsObstacle(y, false, 0, o.y, o.width, o.height, o.collisionBoxes)).toBe(true);
+    }
+    expect(pairs).toBeGreaterThan(0);
+  });
+
+  test('no stacked pairs on mobile (no duck button there)', () => {
+    const random = mulberry32(6);
+    const field = createObstacleField();
+    for (let i = 0; i < 2000; i++) {
+      const o = spawnObstacle(field, 9, random, true);
+      if (o.kind === 'pterodactyl') expect(o.size).toBe(1);
+    }
   });
 });

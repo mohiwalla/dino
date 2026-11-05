@@ -244,6 +244,23 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       return customOn;
     },
 
+    get view() {
+      return { mode, custom: customOn, yaw: orbitYaw, pitch: orbitPitch };
+    },
+
+    setView(view) {
+      // An orbit of the same custom view moves straight away, as the drag did; anything else eases there.
+      if (customOn && view.custom && view.mode === mode) {
+        current[YAW] += view.yaw - orbitYaw;
+        current[PITCH] = THREE.MathUtils.clamp(current[PITCH] + view.pitch - orbitPitch, ORBIT_PITCH_MIN, ORBIT_PITCH_MAX);
+      }
+      mode = view.mode;
+      customOn = view.custom;
+      orbitYaw = view.custom ? view.yaw : 0;
+      orbitPitch = view.custom ? view.pitch : 0;
+      if (view.custom) customView = { mode, yaw: orbitYaw, pitch: orbitPitch };
+    },
+
     setMode(next) {
       mode = next;
       customOn = false;

@@ -63,6 +63,12 @@
   display: block;
 }
 
+/* While the board is up (paused, or lingering as a run starts) it says it all; the line would sit on it. */
+.hud[data-account='signedIn']:not([data-show-board='false'])[data-phase='paused'] .hud-live,
+.hud[data-account='signedIn']:not([data-show-board='false'])[data-board-linger='true'] .hud-live {
+  display: none;
+}
+
 /* ── Leaderboard: a column under the score, or along the bottom on narrower screens ── */
 .hud-board {
   position: absolute;
@@ -120,6 +126,79 @@
 
 .hud-board-title {
   margin-bottom: calc(var(--hud-s) * -1);
+}
+
+/* TEAM BOARD / THIS WEEK: two tabs, the one on show at full strength. */
+.hud-board-head {
+  display: flex;
+  gap: calc(var(--hud-s) * 8);
+}
+
+.hud-board-tab {
+  pointer-events: auto;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hud-board-tab:hover {
+  opacity: 0.7;
+}
+
+.hud-board-tab[aria-pressed='true'] {
+  opacity: 1;
+}
+
+.hud-board-tab:focus {
+  outline: none;
+}
+
+.hud-board-tab:focus-visible {
+  outline: var(--hud-s) dashed var(--hud-ink);
+  outline-offset: var(--hud-s);
+}
+
+/* Last week's winners for the first days of a week: along the bottom, or just the champion under the
+   buttons on narrow screens (where the board takes the bottom). */
+.hud-banner {
+  position: absolute;
+  bottom: calc(var(--safe-bottom) + var(--hud-margin) + 6px);
+  left: 0;
+  right: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--hud-s) * 3);
+  pointer-events: none;
+}
+
+.hud[data-account='signedIn'][data-banner='true']:is([data-phase='title'], [data-phase='crashed']) .hud-banner {
+  display: flex;
+}
+
+.hud .hud-banner-narrow {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  .hud-banner {
+    top: calc(var(--safe-top) + var(--hud-margin) + 48px);
+    bottom: auto;
+  }
+
+  .hud .hud-banner-wide {
+    display: none;
+  }
+
+  .hud .hud-banner-narrow {
+    display: block;
+  }
 }
 
 @media (min-width: 900px) {
@@ -294,6 +373,14 @@
 
 .hud[data-can-restart='true'] .hud-over .hud-hint {
   opacity: 0.85;
+}
+
+/* A replay's own presses are dropped: while it loads or plays there is nothing to press for (once it has
+   played out, the game-over screen offers to watch it again). */
+.hud:not([data-replay='off'], [data-replay='over']) .hud-over .hud-restart,
+.hud:not([data-replay='off'], [data-replay='over']) .hud-over .hud-hint,
+.hud:not([data-replay='off']) .hud-press {
+  display: none;
 }
 
 .hud-paused {
@@ -788,4 +875,11 @@
 :root[data-orbit='dragging'],
 :root[data-orbit='dragging'] * {
   cursor: grabbing !important;
+}
+
+/* A replay shows its player's camera and theme, so the viewer's buttons for them step aside. */
+.hud:not([data-replay='off']) .hud-btn-camera,
+.hud:not([data-replay='off']) .hud-btn-theme,
+.hud:not([data-replay='off']) .hud-legend {
+  display: none;
 }

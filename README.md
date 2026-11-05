@@ -41,6 +41,8 @@ swoops out to the play framing when the run starts.
 | `?theme=dark|light` | Starting theme (otherwise the saved choice, then the OS setting). |
 | `?replay=<run id>` | Play back a stored leaderboard run (signed in; see the admin page). |
 | `?star` | Open the "star it on GitHub" prompt at once, even if it was already answered. |
+| `?winners` | Show last week's winners banner now (with the board's top 3 if last week had none). |
+| `?stale` | Pretend this tab is from before the latest game update, to see the reload message. |
 
 For tests, `window.__dino` (on localhost, or for an admin signed in on the live site) exposes `getSnapshot()`, `advance(n, input?)`, `setAutoplay(on)`,
 `setCameraMode(mode)`, `freeze(on)` (stop real-time stepping, keep rendering), `info` (triangles,
@@ -107,8 +109,9 @@ The server also checks the run against its own clock and against the autopilot:
   - runs whose jumps come at the same distance from the obstacles, or whose jump holds or
     mid-air ducks are mostly the same length (both machine-like).
 
-Admins (`ADMIN_EMAILS`) use `/admin` to watch runs (`?replay=`), approve or void them, and ban
-players.
+Players see their own runs at `/runs` (or MY RUNS in the settings): best and rank, all time and
+this week, and a replay of each. Admins (`ADMIN_EMAILS`) use `/admin` to watch runs (`?replay=`),
+approve or void them, and ban players.
 
 `SIM_VERSION` in `src/sim/replay.ts` must be bumped whenever a change alters how runs play out.
 `test/sim-replay.test.ts` fails until it is. The server refuses runs from other versions.

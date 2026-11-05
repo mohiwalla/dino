@@ -1,0 +1,540 @@
+/* The game's plain pages (admin, my runs), drawn like its HUD: pixel text, Chrome's grey ink,
+   square 2 px outlines (one art pixel), no rounded corners, and the game's day and night palettes. */
+:root {
+  --s: 2px;
+  --ink: #535353;
+  --bg: #f7f7f7;
+  --line: rgb(83 83 83 / 18%);
+  --hover: rgb(83 83 83 / 7%);
+  --danger: #c62828;
+  --warn: #9a6a00;
+  --gold: #d9a400;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --ink: #acacac;
+  --bg: #080808;
+  --line: rgb(172 172 172 / 20%);
+  --hover: rgb(172 172 172 / 8%);
+  --danger: #ff6e6e;
+  --warn: #ffc61a;
+  --gold: #ffc61a;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.4 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+main {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 16px 64px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+.px-words {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--px-scale, 2px) * 5) calc(var(--px-scale, 2px) * 4);
+}
+
+/* ── Top bar over a ground line, like the runner's horizon ── */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  background: var(--bg);
+  box-shadow: 0 var(--s) 0 var(--ink);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.brand img {
+  image-rendering: pixelated;
+}
+
+.links {
+  display: flex;
+  gap: 8px;
+}
+
+.who {
+  margin-left: auto;
+  opacity: 0.6;
+  overflow: hidden;
+}
+
+/* ── Chips: the HUD's outlined pixel buttons ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--s) * 3);
+  min-height: 32px;
+  padding: calc(var(--s) * 3) calc(var(--s) * 5);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  box-shadow: inset 0 0 0 var(--s) currentColor;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Same feel as the game's HUD chips: brighter on hover, down a pixel while pressed. */
+.chip:hover {
+  opacity: 1;
+}
+
+.chip:active {
+  transform: translateY(1px);
+}
+
+.chip:focus {
+  outline: none;
+}
+
+.chip:disabled,
+.chip:disabled:hover {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
+.chip[aria-current='page'],
+.chip[aria-selected='true'],
+.chip-primary {
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: inset 0 0 0 var(--s) var(--ink);
+  opacity: 1;
+}
+
+.chip[aria-current='page']:hover,
+.chip[aria-selected='true']:hover,
+.chip-primary:hover {
+  background: var(--ink);
+}
+
+.chip-danger {
+  color: var(--danger);
+}
+
+.chip-danger:active {
+  background: var(--danger);
+  color: var(--bg);
+  box-shadow: inset 0 0 0 var(--s) var(--danger);
+}
+
+.chip:focus-visible,
+.search:focus-visible {
+  outline: var(--s) dashed var(--ink);
+  outline-offset: var(--s);
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--s) calc(var(--s) * 2);
+  background: var(--warn);
+  color: var(--bg);
+}
+
+/* ── Heading and summary numbers ── */
+.heading {
+  display: grid;
+  gap: 14px;
+  margin: 40px 0 28px;
+}
+
+.lede {
+  opacity: 0.6;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+.stat {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px 18px;
+  box-shadow: inset 0 0 0 var(--s) var(--ink);
+}
+
+.stat-label,
+.stat-note {
+  opacity: 0.6;
+}
+
+.stat-note {
+  opacity: 0.45;
+}
+
+/* ── Section heading: a label with a rule out to the edge, as in the settings panel ── */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search {
+  min-width: 240px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  box-shadow: inset 0 0 0 var(--s) var(--ink);
+  font: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.search::placeholder {
+  color: inherit;
+  opacity: 0.45;
+}
+
+/* ── Tables ── */
+.table {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 14px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  padding-top: 0;
+  opacity: 0.5;
+  font-weight: normal;
+  box-shadow: inset 0 calc(var(--s) * -1) 0 var(--ink);
+}
+
+td {
+  box-shadow: inset 0 calc(var(--s) * -1) 0 var(--line);
+}
+
+tbody tr:hover td {
+  background: var(--hover);
+}
+
+th:first-child,
+td:first-child {
+  padding-left: 4px;
+}
+
+.num {
+  text-align: right;
+}
+
+.cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.num .cell,
+.actions .cell {
+  justify-content: flex-end;
+}
+
+.cell-label {
+  display: none;
+}
+
+.muted,
+.note {
+  opacity: 0.5;
+}
+
+.player {
+  display: grid;
+  gap: 8px;
+}
+
+.player .note {
+  opacity: 0.5;
+}
+
+.actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.actions .cell {
+  gap: 8px;
+}
+
+/* Admin rows have up to three actions: WATCH, then APPROVE and VOID under it. */
+.actions .cell:has(> :nth-child(3)) {
+  width: 210px;
+}
+
+.why {
+  min-width: 200px;
+  max-width: 280px;
+  opacity: 0.7;
+}
+
+.best {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--gold);
+}
+
+/* ── Status: outlined like a chip, in the status's colour ── */
+.pill {
+  display: inline-flex;
+  padding: calc(var(--s) * 2) calc(var(--s) * 3);
+  box-shadow: inset 0 0 0 var(--s) currentColor;
+  white-space: nowrap;
+}
+
+.pill-ok {
+  opacity: 0.75;
+}
+
+.pill-warn {
+  color: var(--warn);
+}
+
+.pill-bad {
+  color: var(--danger);
+}
+
+/* ── Empty, loading, and the panels (signed out, not allowed) ── */
+.empty,
+.loading {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  padding: 64px 16px;
+  text-align: center;
+}
+
+.empty > .px-words {
+  justify-content: center;
+  opacity: 0.6;
+}
+
+.loading {
+  animation: blink 1s steps(1, end) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.panel {
+  display: grid;
+  gap: 20px;
+  max-width: 440px;
+  margin: 72px auto;
+  padding: 28px;
+  box-shadow: inset 0 0 0 var(--s) var(--ink);
+}
+
+.panel p {
+  opacity: 0.7;
+}
+
+.panel-actions,
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* ── Toasts and the confirm dialog ── */
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  left: auto;
+  z-index: 3;
+  max-width: calc(100% - 32px);
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--bg);
+  transition: opacity 0.4s ease, transform 0.4s steps(4, end);
+}
+
+.toast-bad {
+  background: var(--danger);
+}
+
+.toast-out {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.confirm {
+  max-width: min(420px, calc(100% - 32px));
+  padding: 24px;
+  border: 0;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 0 0 var(--s) var(--ink);
+}
+
+.confirm::backdrop {
+  background: rgb(247 247 247 / 70%);
+}
+
+:root[data-theme='dark'] .confirm::backdrop {
+  background: rgb(8 8 8 / 70%);
+}
+
+.confirm h2 {
+  margin-bottom: 14px;
+}
+
+.confirm p {
+  margin-bottom: 22px;
+  opacity: 0.7;
+}
+
+/* ── Phones: the email goes, and every table row becomes a card with labelled cells ── */
+@media (max-width: 680px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 12px 16px;
+  }
+
+  .who {
+    display: none;
+  }
+
+  .heading {
+    margin-top: 28px;
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .stat {
+    padding: 14px;
+  }
+
+  .search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  thead {
+    display: none;
+  }
+
+  table,
+  tbody,
+  tr,
+  td {
+    display: block;
+  }
+
+  tr {
+    margin-bottom: 12px;
+    padding: 6px 0;
+    box-shadow: inset 0 0 0 var(--s) var(--ink);
+  }
+
+  td,
+  td:first-child {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    box-shadow: none;
+    text-align: right;
+  }
+
+  tbody tr:hover td {
+    background: none;
+  }
+
+  .cell-label {
+    display: inline-flex;
+    opacity: 0.5;
+  }
+
+  .cell {
+    justify-content: flex-end;
+  }
+
+  td.unlabelled {
+    justify-content: flex-end;
+  }
+
+  .player {
+    justify-items: end;
+  }
+
+  .why {
+    min-width: 0;
+    max-width: none;
+    justify-content: flex-end;
+  }
+}

@@ -149,17 +149,17 @@ export function createObstaclePool(models: ModelLibrary): ObstaclePool {
     }
   }
 
-  /** Pterodactyls flap (geometry swap) and pop in, scaling about their centre. */
+  /** Pterodactyls flap (geometry swap) and pop in, scaling about their centre; a stacked pair has a second bird stackGap up. */
   function posePterodactyl(v: ObstacleView, o: ObstacleSnapshot): void {
-    const mesh = v.meshes[0];
-    if (o.frame !== v.frame) {
-      v.frame = o.frame;
-      mesh.geometry = models.pterodactyl(o.frame);
-    }
     const s = Math.max(0.001, easeOutBack(THREE.MathUtils.clamp(v.age / SPAWN_MS, 0, 1)));
-    const { width, height } = OBSTACLES.pterodactyl;
-    mesh.scale.setScalar(s);
-    mesh.position.set((width / 2) * (1 - s), (height / 2) * (1 - s), 0);
+    const { width, height, stackGap } = OBSTACLES.pterodactyl;
+    for (let i = 0; i < o.size; i++) {
+      const mesh = v.meshes[i];
+      if (o.frame !== v.frame || mesh.geometry !== models.pterodactyl(o.frame)) mesh.geometry = models.pterodactyl(o.frame);
+      mesh.scale.setScalar(s);
+      mesh.position.set((width / 2) * (1 - s), i * stackGap + (height / 2) * (1 - s), 0);
+    }
+    v.frame = o.frame;
   }
 
   return {

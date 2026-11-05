@@ -381,6 +381,9 @@ export interface TrexView {
   crash(): void;
   /** The hits (s) of the crash clip about to play; the next funny crash twitches on them. */
   setCrashBeats(beats: readonly number[]): void;
+  /** A replay's crash move, used instead of the bag's (null: the bag again). */
+  setCrashMove(move: string | null): void;
+  readonly crashMove: string;
   restart(): void;
   /** A rank up or a new best on the game-over screen: stand up and hop for joy until restart. */
   celebrate(): void;
@@ -446,6 +449,7 @@ export function createTrexView(models: ModelLibrary): TrexView {
   let funny = false;
   const moves = createShuffleBag(CRASH_MOVES);
   let move: CrashMove = 'flop';
+  let forcedMove: CrashMove | null = null;
   /** Seconds into a funny crash, or -1. */
   let crashT = -1;
   /** The hits of the crash clip about to play (set before the crash), and how many have landed. */
@@ -634,7 +638,7 @@ export function createTrexView(models: ModelLibrary): TrexView {
         tilt.v += CRASH_KICK;
         return;
       }
-      move = moves.next();
+      move = forcedMove ?? moves.next();
       crashT = 0;
       if (move === 'flop') tilt.v += FLOP_KICK;
       else if (move === 'faceplant') tilt.v -= FLOP_KICK;
@@ -642,6 +646,14 @@ export function createTrexView(models: ModelLibrary): TrexView {
 
     setCrashBeats(next) {
       pendingBeats = next;
+    },
+
+    setCrashMove(next) {
+      forcedMove = CRASH_MOVES.find((m) => m === next) ?? null;
+    },
+
+    get crashMove() {
+      return move;
     },
 
     celebrate() {

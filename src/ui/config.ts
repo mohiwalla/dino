@@ -140,6 +140,12 @@ export function createConfigPanel(
   add(signIn, SIGN_IN_ICON, 'hud-chip-icon', 'small');
   add(signIn, layoutText('SIGN IN'), 'hud-chip-text', 'small');
   const setRanked = toggle('RANKED RUNS', 'Ranked runs', 'ranked');
+  const historyRow = row('HISTORY');
+  const historyLabel = historyRow.previousElementSibling as HTMLElement;
+  const myRuns = el('a', 'hud-chip', historyRow);
+  myRuns.href = '/runs';
+  myRuns.setAttribute('data-ui', '');
+  add(myRuns, layoutText('MY RUNS'), 'hud-chip-text', 'small');
   const boardRow = row('TEAM BOARD');
   const boardLabel = boardRow.previousElementSibling as HTMLElement;
   const board = radio(boardRow, 'Team board', [[true, 'SHOWN'], [false, 'HIDDEN']], (on) => emitSettings({ showBoard: on }));
@@ -255,6 +261,7 @@ export function createConfigPanel(
       // The board only shows with ranked runs on.
       board.set(next.showBoard && next.ranked, () => !next.ranked);
       boardRow.hidden = boardLabel.hidden = !signedIn;
+      historyRow.hidden = historyLabel.hidden = !signedIn;
       modes.set(next.mode);
       // NSFW picks funny mode's crash clips, so it only shows there.
       setNsfw(next.nsfw, false, next.mode !== 'funny');

@@ -49,7 +49,7 @@ export interface ObstacleSnapshot {
   /** Unique for the page's lifetime; renderers key their mesh pools on it. */
   id: number;
   kind: ObstacleKind;
-  /** Cacti side by side (1..3). Always 1 for pterodactyls. */
+  /** Cacti side by side (1..3). Pterodactyls: 1, or 2 for a duck-only stacked pair (OBSTACLES.pterodactyl.stackGap apart). */
   size: number;
   /** One model variant per cactus in the group (length === size), each in [0, CACTUS_VARIANTS[kind]). [0] for pterodactyls. */
   variants: number[];
@@ -150,6 +150,8 @@ export interface GameSimOptions {
   startCrashed?: boolean;
   /** Runs begin at RUNNER.FAST_START_SPEED (see GameSim.setStartFast). */
   startFast?: boolean;
+  /** Chrome's obstacle rules (no birds below 8.5, an even pick, no stacked pairs): runs recorded before SIM_VERSION 3. */
+  classicObstacles?: boolean;
 }
 
 // Factory: src/sim/game.ts      export function createGameSim(opts?: GameSimOptions): GameSim
@@ -176,6 +178,8 @@ export interface Settings {
   multiplier: number;
   /** Show the team board on the title and game-over screens. */
   showBoard: boolean;
+  /** Which team board shows: all time, or this week's. */
+  boardPeriod: 'all' | 'week';
   mode: GameMode;
   /** Jumps fart, with a cloud. A funny-mode option: it only counts in funny mode. */
   farts: boolean;
@@ -183,6 +187,39 @@ export interface Settings {
   nsfw: boolean;
   /** Chrome's night every so often. Off, the chosen theme (D) stays put. */
   dayNight: boolean;
+}
+
+/** What the player saw that their settings and controls decide (all but sound), at one moment of a run. */
+export interface LookState {
+  mode: GameMode;
+  farts: boolean;
+  nsfw: boolean;
+  dayNight: boolean;
+  dark: boolean;
+  camera: CameraView;
+}
+
+/**
+ * How a run looked and sounded to its player, saved with a ranked run so its replay shows exactly
+ * the same: their look as the run started and every change to it after (settings, theme, camera
+ * switches and drags), and what came up at random (the crash clip, the game-over line, the crash
+ * move, and a seed for the fart sounds). Only the viewer's sound level and mute are their own.
+ */
+export interface RunLook extends LookState {
+  /** Changes to the look: [steps into the run, the fields that changed]. */
+  changes: [number, Partial<LookState>][];
+  /** The high score on screen as the run started. */
+  hi: number;
+  /** The T-Rex wore the crown (its player was #1) as the run started; it flew off to the board. */
+  crown: boolean;
+  /** Seeds the fart sounds' order and pitch for the run. */
+  fx: number;
+  /** The crash clip's URL; empty when the crash sound was synthesised. */
+  clip: string;
+  /** Funny mode's game-over line. */
+  line: string;
+  /** Funny mode's crash move. */
+  move: string;
 }
 
 export interface InputController {
@@ -230,6 +267,14 @@ export interface Sfx {
   stopFunny(): void;
   /** The hits (s) of the crash clip the last play('slide') started, for the crash to move to; empty otherwise. */
   readonly crashBeats: readonly number[];
+  /** The URL of the crash clip the last play('slide') started; empty if it was synthesised. */
+  readonly crashClip: string;
+  /** A replay: crashes play this clip (fetched now) instead of the bag's; '' plays the synthesised sound, as its player heard. */
+  queueCrash(url: string): void;
+  /** The queued clip has loaded (or failed to, or there's no audio): the replay can start without missing it. */
+  readonly crashReady: boolean;
+  /** Fart sounds come in an order and pitch set by `seed`, so a replay hears the run's own. */
+  seedFarts(seed: number): void;
 }
 
 // Factory: src/audio/sfx.ts     export function createSfx(): Sfx  (persists mute and volume in localStorage)
@@ -286,6 +331,10 @@ export interface Entities {
   setFunny(on: boolean): void;
   /** The hits (s) of the crash clip that just started, for the crash about to be shown. */
   setCrashBeats(beats: readonly number[]): void;
+  /** A replay: funny crashes do this move instead of the next one in the bag (null: back to the bag). */
+  setCrashMove(move: string | null): void;
+  /** The last funny crash's move. */
+  readonly crashMove: string;
   /** The player is #1 on the team board: the T-Rex wears a crown. */
   setCrown(on: boolean): void;
   /** Fly the crown from the head to its resting place by the board, or from there onto the head. */
@@ -311,11 +360,23 @@ export type CameraMode = 'cinematic' | 'side';
 
 export const CAMERA_MODES: readonly CameraMode[] = ['cinematic', 'side'];
 
+/** Where the camera looks: a preset, and (custom) the player's orbit from it, in radians. */
+export interface CameraView {
+  mode: CameraMode;
+  custom: boolean;
+  yaw: number;
+  pitch: number;
+}
+
 export interface CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   readonly mode: CameraMode;
   /** The view is the player's custom one (a preset turned by a camera drag). */
   readonly custom: boolean;
+  /** The view as it stands, for a ranked run's replay. */
+  readonly view: CameraView;
+  /** A replay: the camera takes this view, following orbit changes as a drag would. */
+  setView(view: CameraView): void;
   /** Smoothly transitions to the new mode (a preset; leaves the custom view). */
   setMode(mode: CameraMode): void;
   /** The camera button / C: cinematic, side, then the custom view if the player has made one. */
@@ -351,6 +412,13 @@ export interface HudContext {
   fps: number | null;
   /** Paused and counting down to resume: the number to show (3, 2, 1), else null. */
   resumeIn: number | null;
+  /**
+   * A replay: loading, playing (by itself), or over (it stays on its game-over screen, where a press
+   * watches it again). 'off' outside replays.
+   */
+  replay: 'off' | 'loading' | 'playing' | 'over';
+  /** The mode the run is shown in: the setting's, but always regular in a replay. */
+  mode: GameMode;
 }
 
 /** One leaderboard row: a player's best verified run. */
@@ -376,6 +444,10 @@ export interface BoardView {
   email: string | null;
   /** The top rows, plus the player's own row at the end if it is further down. */
   entries: readonly BoardEntry[];
+  /** The same for this week (Monday to Sunday, India time). */
+  week: readonly BoardEntry[];
+  /** Last week's top 3 while they are news (the first days of a week), else empty. */
+  lastWeek: readonly BoardEntry[];
   /** A line under the board on the title and game-over screens (the last run's verdict). */
   note: string;
   /** A line under the score while a run is going (RANKED, or why it is not). */
@@ -395,6 +467,10 @@ export interface Hud {
   crownRest(): { right: number; baseline: number; height: number; opacity: number } | null;
   /** Confetti over the game, for a rank up or a new best. */
   celebrate(): void;
+  /** A replay: funny game overs show this line instead of a random one (null: random again). */
+  setCrashLine(line: string | null): void;
+  /** The last funny game over's line. */
+  readonly crashLine: string;
   handleEvents(events: GameEvent[]): void;
   /** HUD buttons (camera, mute, theme, pause, config) emit UiActions. */
   onAction(cb: (action: UiAction) => void): () => void;

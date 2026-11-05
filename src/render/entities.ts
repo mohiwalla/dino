@@ -131,6 +131,14 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
       trex.setCrashBeats(beats);
     },
 
+    setCrashMove(move) {
+      trex.setCrashMove(move);
+    },
+
+    get crashMove() {
+      return trex.crashMove;
+    },
+
     celebrate() {
       trex.celebrate();
       obstacles.bury();

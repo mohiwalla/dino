@@ -123,12 +123,14 @@
       const ctx = {
         cameraMode: q.get('mode') ?? 'cinematic',
         cameraCustom: false,
-        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, multiplier: 1, mode: 'regular', farts: false, nsfw: false, dayNight: true },
+        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, boardPeriod: 'all', multiplier: 1, mode: 'regular', farts: false, nsfw: false, dayNight: true },
         configOpen: q.get('config') === '1',
         starOpen: q.get('star') === '1',
         touch: q.get('touch') === '1',
         fps: q.has('fps') ? Number(q.get('fps')) : null,
         resumeIn: q.has('resumeIn') ? Number(q.get('resumeIn')) : null,
+        replay: q.get('replay') ?? 'off',
+        mode: 'regular',
       };
 
       const hud = createHud(document.getElementById('hud'));

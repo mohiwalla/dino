@@ -10,12 +10,16 @@ import { STORAGE_KEYS } from '../config';
 import { mulberry32 } from '../sim/rng';
 import { createInputRecorder, SIM_VERSION, type InputRecorder } from '../sim/replay';
 import { STEPS } from '../sim/steps';
-import type { BoardEntry, BoardView, GameEvent, GameSim, InputFrame } from '../types';
-import { api, ApiError, type Account, type BoardData, type FinishResult } from './api';
+import type { BoardEntry, BoardView, GameEvent, GameSim, InputFrame, RunLook } from '../types';
+import { api, ApiError, type Account, type BoardData, type BoardList, type FinishResult } from './api';
 
 const BEAT_MS = 10_000;
 const BOARD_ROWS = 10;
 const FINISH_TRIES = 3;
+/** ?stale: this tab claims the previous game version, to see what a tab left open over an update gets. */
+const STALE = new URLSearchParams(location.search).has('stale');
+/** ?winners: show last week's winners banner now (with this board's top 3 if last week had none). */
+const PREVIEW_WINNERS = new URLSearchParams(location.search).has('winners');
 
 export interface RankedOptions {
   /** The sim being played (main.ts swaps it for replays). */
@@ -30,6 +34,8 @@ export interface RankedOptions {
   /** The server (not the cached account) says the player is an admin. */
   onAdmin: () => void;
   onView: (view: BoardView) => void;
+  /** How the run looked and sounded, read as it's submitted (after the crash has been shown). */
+  look: () => RunLook;
 }
 
 export interface Ranked {
@@ -95,11 +101,14 @@ export function createRanked(opts: RankedOptions): Ranked {
   let newBest: BoardView['newBest'] = null;
   let statsDeleted: BoardView['statsDeleted'] = null;
   let lastRunRanked = false;
+  /** The server said this tab's game is out of date (it was updated since the page loaded). */
+  let outdated = false;
   /** The last finish upload; the next run's start waits for it, so it can't abandon that run. */
   let finishing: Promise<unknown> = Promise.resolve();
 
-  function publish(): void {
-    const entries: BoardEntry[] = (board?.entries ?? []).slice(0, BOARD_ROWS).map((e) => ({
+  /** A board's top rows, plus the player's own row at the end if they are further down. */
+  function rows(list: BoardList | undefined): BoardEntry[] {
+    const entries: BoardEntry[] = (list?.entries ?? []).slice(0, BOARD_ROWS).map((e) => ({
       rank: e.rank,
       name: e.name,
       score: e.score,
@@ -108,14 +117,22 @@ export function createRanked(opts: RankedOptions): Ranked {
       multiplier: e.multiplier,
       me: e.me,
     }));
-    if (board?.me && board.me.rank > BOARD_ROWS) {
-      entries.push({ rank: board.me.rank, name: account?.name ?? '', score: board.me.score, mobile: false, fast: false, multiplier: 1, me: true });
+    if (list?.me && list.me.rank > BOARD_ROWS) {
+      entries.push({ rank: list.me.rank, name: account?.name ?? '', score: list.me.score, mobile: false, fast: false, multiplier: 1, me: true });
     }
-    let shownNote = note;
+    return entries;
+  }
+
+  function publish(): void {
+    const entries = rows(board ?? undefined);
+    const week = rows(board?.week);
+    const winners = board?.announce || (PREVIEW_WINNERS && board?.lastWeek?.length) ? (board?.lastWeek ?? []) : PREVIEW_WINNERS ? (board?.entries ?? []).slice(0, 3) : [];
+    const lastWeek = rows({ entries: winners, me: null, players: 0 }).map((e) => ({ ...e, me: false }));
+    let shownNote = outdated ? 'GAME UPDATED - RELOAD THE PAGE' : note;
     if (!shownNote && account?.banned) shownNote = 'BANNED FROM THE BOARD';
     else if (!shownNote && reachable && !account) shownNote = 'SIGN IN TO JOIN THE TEAM BOARD';
     else if (!shownNote && account && entries.length === 0) shownNote = 'NO RANKED RUNS YET';
-    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, note: shownNote, live, newBest, statsDeleted });
+    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, week, lastWeek, note: shownNote, live, newBest, statsDeleted });
   }
 
   async function refresh(): Promise<void> {
@@ -159,7 +176,7 @@ export function createRanked(opts: RankedOptions): Ranked {
     r.unsent = r.unsent.concat(r.recorder.take());
     const body = { steps: r.recorder.steps, inputs: r.unsent };
     const sent = r.unsent.length;
-    const result = final ? await api.finish(r.id!, body) : (await api.beat(r.id!, body), null);
+    const result = final ? await api.finish(r.id!, { ...body, look: opts.look() }) : (await api.beat(r.id!, body), null);
     r.unsent = r.unsent.slice(sent);
     return result;
   }
@@ -227,7 +244,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       return;
     }
     finishing
-      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: SIM_VERSION }))
+      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: STALE ? SIM_VERSION - 1 : SIM_VERSION }))
       .then(({ id, seed }) => {
         if (r.state !== 'starting') return;
         const sim = opts.sim();
@@ -243,7 +260,15 @@ export function createRanked(opts: RankedOptions): Ranked {
         live = 'RANKED';
         publish();
       })
-      .catch(() => unranked(r));
+      .catch((err: unknown) => {
+        unranked(r);
+        // The game was updated since this tab loaded: runs can't be ranked until it reloads.
+        if (err instanceof ApiError && err.status === 409) {
+          outdated = true;
+          live = 'RELOAD TO RANK';
+          publish();
+        }
+      });
     publish();
   }
 
@@ -270,7 +295,9 @@ export function createRanked(opts: RankedOptions): Ranked {
         clearInterval(run.timer);
         run.state = 'finished';
         live = '';
-        if (ranked) finishing = finish(run);
+        // A microtask later, once this frame has shown the crash and picked its clip, line and move.
+        const r = run;
+        if (ranked) finishing = Promise.resolve().then(() => finish(r));
         else publish();
       }
     },

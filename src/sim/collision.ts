@@ -1,7 +1,7 @@
 // Chrome checkForCollision, in y-up world space. Chrome's boxes are sprite-local with y growing
 // down from the sprite's top; every box here is converted once to y-up, bottom-left origin.
 
-import { OBSTACLES, TREX } from '../config';
+import { OBSTACLES, TREX, type ObstacleTypeConfig } from '../config';
 import type { Box, ObstacleKind } from '../types';
 
 interface ChromeBox {
@@ -19,10 +19,14 @@ export const TREX_RUNNING_BOXES: readonly Box[] = TREX.COLLISION_RUNNING.map((b)
 /** Chrome measures the ducking box from the 47 px standing sprite's top, so convert with HEIGHT too. */
 export const TREX_DUCKING_BOXES: readonly Box[] = TREX.COLLISION_DUCKING.map((b) => toYUp(b, TREX.HEIGHT));
 
-/** Fine boxes for a group of `size` obstacles, with Chrome's stretch of the middle box. */
+/**
+ * Fine boxes for a group of `size` obstacles, with Chrome's stretch of the middle box. Two
+ * pterodactyls are a stacked pair: the second bird's boxes again, stackGap higher.
+ */
 export function obstacleCollisionBoxes(kind: ObstacleKind, size: number): Box[] {
-  const type = OBSTACLES[kind];
+  const type: ObstacleTypeConfig = OBSTACLES[kind];
   const boxes = type.collision.map((b) => toYUp(b, type.height));
+  if (kind === 'pterodactyl' && size === 2) return [...boxes, ...boxes.map((b) => ({ ...b, y: b.y + (type.stackGap ?? 0) }))];
   if (size > 1 && boxes.length >= 3) {
     const width = type.width * size;
     boxes[1].w = width - boxes[0].w - boxes[2].w;

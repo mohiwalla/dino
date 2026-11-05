@@ -135,6 +135,7 @@ export function createSfx(): Sfx {
   let ctx: AudioContext | null = null;
   const clips = createFunnyClips();
   let crashBeats: readonly number[] = [];
+  let crashClip = '';
   let master: GainNode | null = null;
   let failed = false;
 
@@ -195,7 +196,9 @@ export function createSfx(): Sfx {
 
   return {
     play(name: SfxName): void {
+      // What this crash plays (for its replay): nothing yet; a clip below, if one starts.
       if (name === 'slide') crashBeats = [];
+      if (name === 'slide') crashClip = '';
       if (!ctx || !master || ctx.state !== 'running') return;
       // Muted or away, short sounds are skipped; the crash clip still runs (silent) so unmuting partway
       // through it brings it in where it would be.
@@ -205,7 +208,10 @@ export function createSfx(): Sfx {
         if (name === 'fart' || name === 'slide') {
           clips.load(ctx);
           if (clips.play(ctx, master, name, t0)) {
-            if (name === 'slide') crashBeats = clips.crashBeats;
+            if (name === 'slide') {
+              crashBeats = clips.crashBeats;
+              crashClip = clips.crashClip;
+            }
             return;
           }
         }
@@ -241,6 +247,23 @@ export function createSfx(): Sfx {
 
     get crashBeats() {
       return crashBeats;
+    },
+
+    get crashClip() {
+      return crashClip;
+    },
+
+    get crashReady() {
+      return !ctx || clips.crashReady;
+    },
+
+    queueCrash(url) {
+      const c = ensureContext();
+      if (c) clips.queueCrash(c, url);
+    },
+
+    seedFarts(seed) {
+      clips.seedFarts(seed);
     },
 
     stopFunny() {

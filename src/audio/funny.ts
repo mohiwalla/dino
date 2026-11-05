@@ -9,6 +9,7 @@
 //   slide – a cartoon bonk, then a slide whistle falling away.
 
 import { createShuffleBag } from '../shuffle';
+import { mulberry32 } from '../sim/rng';
 import { findBeats } from './beats';
 
 const FART_URLS = Object.values(import.meta.glob<string>('./farts/*.mp3', { eager: true, query: '?url', import: 'default' }));
@@ -108,6 +109,14 @@ export interface FunnyClips {
   stopCrash(): void;
   /** The hits of the crash clip last started by play('slide'), in seconds; empty if it was synthesised. */
   readonly crashBeats: readonly number[];
+  /** The URL of the crash clip last started by play('slide'); empty if it was synthesised. */
+  readonly crashClip: string;
+  /** A replay: every crash plays this clip (fetched now) whatever the bag holds; '' plays none (the synthesised sound). */
+  queueCrash(ctx: BaseAudioContext, url: string): void;
+  /** The queued clip has loaded (or failed to): a replay may start. True with nothing queued. */
+  readonly crashReady: boolean;
+  /** Farts come in an order and pitch set by `seed`. */
+  seedFarts(seed: number): void;
 }
 
 export function createFunnyClips(): FunnyClips {
@@ -122,7 +131,13 @@ export function createFunnyClips(): FunnyClips {
   let nextCrash: AudioBuffer | null = null;
   let nextBeats: number[] = [];
   let crashBeats: readonly number[] = [];
+  let crashClip = '';
+  /** A replay's crash clip ('' for none: the synthesised sound), or null to take them from the bag. */
+  let queued: string | null = null;
+  /** The clip last asked for, and the last one done loading (or failing to). */
   let crashUrl = '';
+  let loadedUrl = '';
+  let fartRandom: () => number = Math.random;
   let fetchingCrash = false;
   let playingCrash: AudioBufferSourceNode | null = null;
 
@@ -131,19 +146,25 @@ export function createFunnyClips(): FunnyClips {
       .then((r) => r.arrayBuffer())
       .then((data) => ctx.decodeAudioData(data));
 
-  /** Takes the next crash clip from the bag and decodes it, ready for the next crash. */
+  /** Takes the next crash clip (the replay's, else the bag's) and decodes it, ready for the next crash. */
   function prepareCrash(ctx: BaseAudioContext): void {
-    if (fetchingCrash || nextCrash || crashUrls.length === 0) return;
+    if (fetchingCrash || nextCrash || queued === '' || crashUrls.length === 0) return;
     fetchingCrash = true;
-    const url = (crashUrl = crashBag.next());
+    const url = (crashUrl = queued ?? crashBag.next());
     decode(ctx, url)
-      // Dropped if the mode changed while it decoded and the clip isn't in the new set.
       .then((b) => {
-        nextCrash = crashUrls.includes(url) ? b : null;
+        // A clip asked for since (a replay's) wins over this one, whenever each finishes.
+        if (url !== crashUrl) return;
+        // Dropped if the mode changed while it decoded and the clip isn't in the new set (a replay's always counts).
+        nextCrash = url === queued || crashUrls.includes(url) ? b : null;
         nextBeats = nextCrash ? findBeats(nextCrash) : [];
       })
       .catch(() => undefined)
-      .finally(() => (fetchingCrash = false));
+      .finally(() => {
+        if (url !== crashUrl) return;
+        fetchingCrash = false;
+        loadedUrl = url;
+      });
   }
 
   return {
@@ -153,7 +174,7 @@ export function createFunnyClips(): FunnyClips {
       Promise.all(FART_URLS.map((u) => decode(ctx, u)))
         .then((buffers) => {
           farts = buffers;
-          fartBag = createShuffleBag(buffers.map((_, i) => i));
+          fartBag = createShuffleBag(buffers.map((_, i) => i), fartRandom);
         })
         .catch(() => (loading = false));
       prepareCrash(ctx);
@@ -164,7 +185,7 @@ export function createFunnyClips(): FunnyClips {
       if (urls === crashUrls) return;
       crashUrls = urls;
       crashBag = createShuffleBag(urls);
-      if (!urls.includes(crashUrl)) nextCrash = null;
+      if (crashUrl !== queued && !urls.includes(crashUrl)) nextCrash = null;
       if (ctx && loading) prepareCrash(ctx);
     },
 
@@ -174,11 +195,12 @@ export function createFunnyClips(): FunnyClips {
       if (name === 'slide') {
         buffer = nextCrash;
         crashBeats = buffer ? nextBeats : [];
+        crashClip = buffer ? crashUrl : '';
         nextCrash = null;
         prepareCrash(ctx);
       } else if (farts.length > 0) {
         buffer = farts[fartBag.next()];
-        rate = 0.9 + Math.random() * 0.25;
+        rate = 0.9 + fartRandom() * 0.25;
       }
       if (!buffer) return false;
       const src = ctx.createBufferSource();
@@ -198,6 +220,29 @@ export function createFunnyClips(): FunnyClips {
 
     get crashBeats() {
       return crashBeats;
+    },
+
+    get crashClip() {
+      return crashClip;
+    },
+
+    queueCrash(ctx, url) {
+      queued = url;
+      if (url !== '' && crashUrl === url && (nextCrash || fetchingCrash)) return;
+      // Whatever was loading (a bag clip) is disowned: it lands nowhere when it finishes.
+      crashUrl = url;
+      nextCrash = null;
+      fetchingCrash = false;
+      prepareCrash(ctx);
+    },
+
+    get crashReady() {
+      return !queued || nextCrash !== null || loadedUrl === queued;
+    },
+
+    seedFarts(seed) {
+      fartRandom = mulberry32(seed);
+      fartBag = createShuffleBag(farts.map((_, i) => i), fartRandom);
     },
 
     stopCrash() {

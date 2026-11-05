@@ -1,8 +1,9 @@
 // admin.html: review flagged runs, void or approve runs, ban players. Admins are listed in
 // ADMIN_EMAILS (wrangler.jsonc); the server checks every call, this page is only a front end.
 
-import './admin.css';
-import { api, ApiError } from './net/api';
+import { revealPage } from './curtain';
+import { api } from './net/api';
+import { actionButton, call, confirmAction, duration, empty, h, heading, loading, panel, pill, px, pxWords, signIn, speed, stats, table, tabs, time, toast, topBar, watchLink } from './pages';
 
 type Tab = 'review' | 'all' | 'users';
 
@@ -32,118 +33,158 @@ interface AdminUser {
 
 const root = document.getElementById('admin') as HTMLElement;
 let tab: Tab = 'review';
+let query = '';
+let review: AdminRun[] = [];
+let all: AdminRun[] | null = null;
+let users: AdminUser[] = [];
 
-async function call<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api/${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = (await res.json()) as T & { error?: string };
-  if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
-  return data;
-}
+const summary = h('div');
+const tabBar = h('div');
+const list = h('div');
+const search = h('input', { type: 'search', className: 'search', placeholder: 'Search players', ariaLabel: 'Search players' });
+search.spellcheck = false;
+search.addEventListener('input', () => {
+  query = search.value.trim().toLowerCase();
+  draw();
+});
 
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
+const matches = (p: { name: string; email: string }) => !query || p.name.toLowerCase().includes(query) || p.email.toLowerCase().includes(query);
 
-function when(ms: number | null): string {
-  return ms === null ? '' : new Date(ms).toLocaleString();
-}
-
-function duration(steps: number): string {
-  const s = Math.round(steps / 60);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
-
-function action(label: string, run: () => Promise<unknown>): HTMLButtonElement {
-  const button = h('button', { type: 'button', textContent: label });
-  button.addEventListener('click', () => {
-    button.disabled = true;
-    run()
-      .then(render)
-      .catch((err: unknown) => {
-        button.disabled = false;
-        alert(err instanceof Error ? err.message : String(err));
-      });
-  });
-  return button;
-}
+const player = (p: { name: string; email: string }) => h('div', { className: 'player' }, px(p.name.toUpperCase()), h('span', { className: 'note' }, px(p.email)));
 
 function runsTable(runs: AdminRun[]): HTMLElement {
-  if (runs.length === 0) return h('p', { className: 'empty', textContent: tab === 'review' ? 'Nothing to review.' : 'No runs yet.' });
-  const body = runs.map((r) => {
-    const actions = h('td', { className: 'actions' }, h('a', { href: `/?replay=${encodeURIComponent(r.id)}`, target: '_blank', textContent: 'Watch' }));
-    if (r.score !== null && r.status !== 'ok') actions.append(action('Approve', () => call(`admin/runs/${r.id}`, { status: 'ok' })));
-    if (r.score !== null && r.status !== 'void') actions.append(action('Void', () => call(`admin/runs/${r.id}`, { status: 'void' })));
-    return h(
-      'tr',
-      {},
-      h('td', {}, h('strong', { textContent: r.name }), h('br'), h('small', { textContent: r.email })),
-      h('td', { className: 'num', textContent: r.score === null ? '–' : String(r.score) }),
-      h('td', {}, h('span', { className: `status status-${r.status}`, textContent: r.status })),
-      h('td', { className: 'flags', textContent: r.flags ?? '' }),
-      h('td', { textContent: `${duration(r.steps)}${r.multiplier !== 1 ? ` · ${r.multiplier}x speed` : ''}${r.fast ? ' · fast start' : ''}${r.mobile ? ' · mobile' : ''}` }),
-      h('td', { textContent: when(r.finished_at) }),
-      actions,
-    );
-  });
-  const head = ['Player', 'Score', 'Status', 'Why', 'Length', 'Finished', ''].map((t) => h('th', { textContent: t }));
-  return h('div', { className: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...head)), h('tbody', {}, ...body)));
-}
-
-function usersTable(users: AdminUser[]): HTMLElement {
-  const body = users.map((u) =>
-    h(
-      'tr',
-      {},
-      h('td', {}, h('strong', { textContent: u.name }), h('br'), h('small', { textContent: u.email })),
-      h('td', { className: 'num', textContent: u.best === null ? '–' : String(u.best) }),
-      h('td', { className: 'num', textContent: String(u.runs) }),
-      h(
-        'td',
-        { className: 'actions' },
-        u.banned ? h('span', { className: 'status status-rejected', textContent: 'banned' }) : '',
-        action(u.banned ? 'Unban' : 'Ban', () => call(`admin/users/${encodeURIComponent(u.id)}`, { banned: !u.banned })),
-      ),
-    ),
-  );
-  const head = ['Player', 'Best', 'Runs', ''].map((t) => h('th', { textContent: t }));
-  return h('div', { className: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...head)), h('tbody', {}, ...body)));
-}
-
-async function render(): Promise<void> {
-  const me = await api.me().catch(() => null);
-  if (!me?.admin) {
-    root.replaceChildren(
-      h('h1', { textContent: 'Dino 3D admin' }),
-      me
-        ? h('p', { textContent: `${me.email} is not an admin.` })
-        : h('p', {}, h('a', { href: api.loginUrl('/admin'), textContent: 'Sign in with Microsoft' }), ' to continue.'),
-    );
-    return;
-  }
-  const tabs = h(
-    'nav',
-    {},
-    ...(['review', 'all', 'users'] as const).map((t) => {
-      const b = h('button', { type: 'button', textContent: t === 'review' ? 'In review' : t === 'all' ? 'All runs' : 'Players' });
-      b.setAttribute('aria-pressed', String(t === tab));
-      b.addEventListener('click', () => {
-        tab = t;
-        void render();
-      });
-      return b;
+  const shown = runs.filter(matches);
+  if (shown.length === 0) return empty(query ? 'NO RUNS FROM PLAYERS MATCHING THAT SEARCH' : tab === 'review' ? 'NOTHING TO REVIEW · ALL CLEAR' : 'NO RUNS YET');
+  return table(
+    [{ label: 'PLAYER' }, { label: 'SCORE', className: 'num' }, { label: 'STATUS' }, { label: 'WHY FLAGGED' }, { label: 'RUN' }, { label: 'FINISHED' }, { label: '', className: 'actions' }],
+    shown.map((r) => {
+      const actions = h('div', { className: 'cell' }, watchLink(r.id, true));
+      if (r.score !== null && r.status !== 'ok' && r.status !== 'rejected') actions.append(actionButton('APPROVE', () => setRun(r, 'ok')));
+      if (r.score !== null && r.status !== 'void' && r.status !== 'rejected') {
+        actions.append(
+          actionButton(
+            'VOID',
+            async () => {
+              if (await confirmAction(`VOID ${r.name.toUpperCase()}'S ${r.score}?`, 'THE RUN COMES OFF THE BOARD. YOU CAN APPROVE IT AGAIN LATER.', 'VOID RUN')) await setRun(r, 'void');
+            },
+            true,
+          ),
+        );
+      }
+      return [
+        player(r),
+        r.score === null ? '-' : String(r.score),
+        pill(r.status),
+        r.flags ? h('span', { className: 'why' }, pxWords(r.flags.toUpperCase())) : '',
+        h('span', { className: 'cell' }, px(duration(r.steps)), h('span', { className: 'note' }, px(`${speed(r)}${r.mobile ? ' 📱' : ''}`))),
+        time(r.finished_at),
+        actions,
+      ];
     }),
   );
-  const content =
-    tab === 'users'
-      ? usersTable((await call<{ users: AdminUser[] }>('admin/users')).users)
-      : runsTable((await call<{ runs: AdminRun[] }>(`admin/runs?status=${tab}`)).runs);
-  root.replaceChildren(h('h1', {}, 'Dino 3D admin ', h('a', { href: '/', textContent: 'Back to the game' })), tabs, content);
 }
 
-void render();
+function usersTable(): HTMLElement {
+  const shown = users.filter(matches);
+  if (shown.length === 0) return empty(query ? 'NO PLAYERS MATCH THAT SEARCH' : 'NO PLAYERS YET');
+  return table(
+    [{ label: 'PLAYER' }, { label: 'BEST', className: 'num' }, { label: 'RUNS', className: 'num' }, { label: 'STATUS' }, { label: '', className: 'actions' }],
+    shown.map((u) => [
+      player(u),
+      u.best === null ? '-' : String(u.best),
+      String(u.runs),
+      u.banned ? pill('banned') : h('span', { className: 'muted' }, px('ACTIVE')),
+      h(
+        'div',
+        { className: 'cell' },
+        u.banned
+          ? actionButton('UNBAN', () => setUser(u, false))
+          : actionButton(
+              'BAN',
+              async () => {
+                if (await confirmAction(`BAN ${u.name.toUpperCase()}?`, 'THEIR RUNS LEAVE THE BOARD AND THEY CAN NO LONGER PLAY RANKED. YOU CAN UNBAN THEM LATER.', 'BAN PLAYER')) await setUser(u, true);
+              },
+              true,
+            ),
+      ),
+    ]),
+  );
+}
+
+async function setRun(r: AdminRun, status: 'ok' | 'void'): Promise<void> {
+  await call(`admin/runs/${encodeURIComponent(r.id)}`, { status });
+  toast(status === 'ok' ? `Approved ${r.name}'s ${r.score}` : `Voided ${r.name}'s ${r.score}`);
+  await load();
+}
+
+async function setUser(u: AdminUser, banned: boolean): Promise<void> {
+  await call(`admin/users/${encodeURIComponent(u.id)}`, { banned });
+  toast(banned ? `Banned ${u.name}` : `Unbanned ${u.name}`);
+  await load();
+}
+
+/** Redraws from what's loaded; searching only calls this, so the box keeps its focus. */
+function draw(): void {
+  const banned = users.filter((u) => u.banned).length;
+  summary.replaceChildren(
+    stats([
+      ['IN REVIEW', String(review.length), review.length ? 'WAITING ON YOU' : 'ALL CLEAR'],
+      ['PLAYERS', String(users.length), `${users.filter((u) => u.runs > 0).length} HAVE PLAYED`],
+      ['BANNED', String(banned)],
+    ]),
+  );
+  tabBar.replaceChildren(
+    tabs<Tab>(
+      [
+        ['review', 'IN REVIEW', review.length],
+        ['all', 'ALL RUNS'],
+        ['users', 'PLAYERS'],
+      ],
+      tab,
+      (t) => {
+        tab = t;
+        void load();
+      },
+    ),
+  );
+  if (tab === 'all' && all === null) list.replaceChildren(loading());
+  else list.replaceChildren(tab === 'users' ? usersTable() : runsTable(tab === 'review' ? review : (all ?? [])));
+}
+
+async function load(): Promise<void> {
+  draw();
+  try {
+    [review, users, all] = await Promise.all([
+      call<{ runs: AdminRun[] }>('admin/runs?status=review').then((r) => r.runs),
+      call<{ users: AdminUser[] }>('admin/users').then((r) => r.users),
+      tab === 'all' ? call<{ runs: AdminRun[] }>('admin/runs?status=all').then((r) => r.runs) : Promise.resolve(all),
+    ]);
+  } catch (err) {
+    toast(err instanceof Error ? err.message : String(err), 'bad');
+  }
+  draw();
+}
+
+async function start(): Promise<void> {
+  root.replaceChildren(loading());
+  const me = await api.me().catch(() => null);
+  if (!me) {
+    root.replaceChildren(topBar(null, 'admin'), signIn('ADMIN', '/admin'));
+    return;
+  }
+  if (!me.admin) {
+    root.replaceChildren(topBar(me, 'admin'), panel('ADMINS ONLY', `${me.email.toUpperCase()} IS NOT AN ADMIN.`, h('a', { className: 'chip chip-primary', href: '/runs' }, px('MY RUNS'))));
+    return;
+  }
+  root.replaceChildren(
+    topBar(me, 'admin'),
+    heading('ADMIN', 'CHECK FLAGGED RUNS · VOID SCORES · BAN PLAYERS'),
+    summary,
+    h('div', { className: 'toolbar' }, tabBar, search),
+    list,
+  );
+  await load();
+}
+
+// Under the curtain from another page until the lists are in.
+void start().finally(revealPage);

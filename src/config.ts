@@ -44,6 +44,12 @@ export const RUNNER = {
   MAX_OBSTACLE_LENGTH: 3,
   MAX_OBSTACLE_DUPLICATION: 2,
   /**
+   * Chance each pick is a pterodactyl, from the start of a run (SIM_VERSION 3 on; before that,
+   * Chrome's even pick among the kinds allowed at the speed, with no birds below 8.5). Re-rolling
+   * a third cactus of a kind in a row tips picks toward birds, so 0.178 makes 20% of obstacles birds.
+   */
+  PTERODACTYL_SHARE: 0.178,
+  /**
    * Our "virtual canvas width". Chrome spawns obstacles at the right edge of a 600 px canvas;
    * a 3D camera can see much further, so new obstacles appear this far ahead of the T-Rex
    * (fog hides the pop-in) and the Chrome gap rule is applied against this edge instead.
@@ -112,6 +118,12 @@ export type ObstacleTypeConfig = {
   readonly minGap: number;
   /** Pterodactyls fly at speed +/- speedOffset relative to the ground. */
   readonly speedOffset: number;
+  /**
+   * Pterodactyls at this height come as a stacked pair, the second stackGap above: too low to run
+   * under and too tall to jump over, so they can only be ducked (SIM_VERSION 3 on; not on mobile).
+   */
+  readonly stackY?: number;
+  readonly stackGap?: number;
   readonly numFrames: number;
   readonly frameMs: number;
   /** Chrome collision boxes for a single obstacle, sprite-local, y-down from the sprite's top-left. */
@@ -163,6 +175,8 @@ export const OBSTACLES = {
     minSpeed: 8.5,
     minGap: 150,
     speedOffset: 0.8,
+    stackY: 25,
+    stackGap: 45,
     numFrames: 2,
     frameMs: 1000 / 6,
     collision: [
@@ -241,6 +255,8 @@ export const STORAGE_KEYS = {
   ranked: 'dino3d.ranked',
   /** "0" when the player hid the team board. */
   showBoard: 'dino3d.showBoard',
+  /** "week" when the player picked this week's board. */
+  boardPeriod: 'dino3d.boardPeriod',
   mode: 'dino3d.mode',
   /** "1" when jumps fart. */
   farts: 'dino3d.farts',

@@ -17,18 +17,33 @@ interface BoardRow {
   finished_at: number;
 }
 
-/** Each unbanned player's best ok run, best first; ties go to whoever got there first. */
+/** Each unbanned player's best ok run finished in [from, to), best first; ties go to whoever got there first. */
 const BEST_RUNS = `
   SELECT user_id, name, score, mobile, fast, multiplier, run_id, finished_at FROM (
     SELECT r.user_id, u.name, r.score, r.mobile, r.fast, r.multiplier, r.id AS run_id, r.finished_at,
            ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.score DESC, r.finished_at ASC) AS n
     FROM runs r JOIN users u ON u.id = r.user_id
-    WHERE r.status = 'ok' AND u.banned = 0
+    WHERE r.status = 'ok' AND u.banned = 0 AND r.finished_at >= ? AND r.finished_at < ?
   ) WHERE n = 1
   ORDER BY score DESC, finished_at ASC`;
 
-async function bestRuns(env: Env): Promise<BoardRow[]> {
-  return (await env.DB.prepare(BEST_RUNS).all<BoardRow>()).results;
+async function bestRuns(env: Env, from = 0, to = Number.MAX_SAFE_INTEGER): Promise<BoardRow[]> {
+  return (await env.DB.prepare(BEST_RUNS).bind(from, to).all<BoardRow>()).results;
+}
+
+/** Weeks run Monday 00:00 to Sunday 23:59, India time (UTC+5:30, no daylight saving). */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
+/** Last week's winners are announced for the first days of the new week. */
+const ANNOUNCE_MS = 3 * DAY_MS;
+
+/** When the week holding `now` began (Monday 00:00 IST), in epoch ms. */
+export function weekStart(now: number): number {
+  const local = now + IST_OFFSET_MS;
+  const midnight = Math.floor(local / DAY_MS) * DAY_MS;
+  const sinceMonday = (new Date(midnight).getUTCDay() + 6) % 7;
+  return midnight - sinceMonday * DAY_MS - IST_OFFSET_MS;
 }
 
 /** The player's 1-based place on the board, or null if they have no verified run. */
@@ -37,11 +52,20 @@ export async function boardRank(env: Env, userId: string): Promise<number | null
   return i < 0 ? null : i + 1;
 }
 
-/** GET /api/leaderboard -> {entries: [{rank, name, score, mobile, fast, multiplier, runId, me}], me: {rank, score} | null, players} */
+/**
+ * GET /api/leaderboard -> {entries, me, players} for all time, the same for this week under `week`,
+ * last week's top 3 under `lastWeek`, and `announce` while last week's winners are news.
+ * entries: [{rank, name, score, mobile, fast, multiplier, runId, me}], me: {rank, score} | null.
+ */
 export async function leaderboard(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
-  const rows = await bestRuns(env);
-  const mine = rows.findIndex((r) => r.user_id === user.id);
+  const now = Date.now();
+  const start = weekStart(now);
+  const [rows, week, last] = await Promise.all([bestRuns(env), bestRuns(env, start), bestRuns(env, start - WEEK_MS, start)]);
+  const board = (list: BoardRow[]) => {
+    const mine = list.findIndex((r) => r.user_id === user.id);
+    return { entries: list.slice(0, BOARD_SIZE).map(entry), me: mine < 0 ? null : { rank: mine + 1, score: list[mine].score }, players: list.length };
+  };
   const entry = (r: BoardRow, i: number) => ({
     rank: i + 1,
     name: r.name,
@@ -53,9 +77,10 @@ export async function leaderboard(request: Request, env: Env): Promise<Response>
     me: r.user_id === user.id,
   });
   return json({
-    entries: rows.slice(0, BOARD_SIZE).map(entry),
-    me: mine < 0 ? null : { rank: mine + 1, score: rows[mine].score },
-    players: rows.length,
+    ...board(rows),
+    week: board(week),
+    lastWeek: last.slice(0, 3).map(entry),
+    announce: now - start < ANNOUNCE_MS && last.length > 0,
   });
 }
 

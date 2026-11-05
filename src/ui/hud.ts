@@ -244,6 +244,7 @@ export function createHud(root: HTMLElement): Hud {
   };
 
   const hud = el('div', 'hud', root);
+  hud.dataset.replay = 'off';
   const confetti = createConfetti(hud);
   hud.dataset.phase = 'title';
   const status = el('div', 'hud-status', hud);
@@ -304,7 +305,24 @@ export function createHud(root: HTMLElement): Hud {
   // ── Leaderboard (title and game over) ──
   const isMenu = (v: ViewState): boolean => v.phase === 'title' || v.phase === 'crashed' || v.phase === 'paused';
   const boardBox = el('div', 'hud-board', hud);
-  add(boardBox, layoutText('TEAM BOARD'), 'hud-board-title', 'small', isMenu);
+  // Two tabs: the all-time team board and this week's (Monday to Sunday, India time).
+  let period: Settings['boardPeriod'] = 'all';
+  const boardHead = el('div', 'hud-board-head', boardBox);
+  const tab = (label: string, which: Settings['boardPeriod']): HTMLButtonElement => {
+    const b = el('button', 'hud-board-tab', boardHead);
+    b.type = 'button';
+    b.setAttribute('data-ui', '');
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => emitSettings({ boardPeriod: which }));
+    add(b, layoutText(label), 'hud-board-title', 'small', isMenu);
+    return b;
+  };
+  const tabs = { all: tab('TEAM BOARD', 'all'), week: tab('THIS WEEK', 'week') };
+  tabs.all.setAttribute('aria-pressed', 'true');
+  tabs.week.setAttribute('aria-pressed', 'false');
+  hud.dataset.boardPeriod = period;
+  /** The board's rows for the tab on show. */
+  const shownRows = (view: BoardView | null): readonly BoardEntry[] => (period === 'week' ? (view?.week ?? []) : (view?.entries ?? []));
   const boardRows = el('div', 'hud-board-rows', boardBox);
   // An invisible crown-sized spot left of first place, where the 3D crown rests (main.ts).
   const crownAnchor = add(boardRows, CROWN_ICON, 'hud-board-crown', 'small', isMenu);
@@ -393,6 +411,22 @@ export function createHud(root: HTMLElement): Hud {
     blink(1300);
   }
 
+  // ── Last week's winners: a banner for the first days of a week ──
+  const banner = el('div', 'hud-banner', hud);
+  banner.setAttribute('role', 'note');
+  const isMenuScreen = (v: ViewState): boolean => v.phase === 'title' || v.phase === 'crashed';
+  const bannerWide = add(banner, layoutText(''), 'hud-banner-wide', 'small', isMenuScreen);
+  add(banner, layoutText('LAST WEEK CHAMPION'), 'hud-banner-narrow', 'small', isMenuScreen);
+  const bannerChampion = add(banner, layoutText(''), 'hud-banner-narrow', 'small', isMenuScreen);
+
+  function setBanner(lastWeek: readonly BoardEntry[]): void {
+    hud.dataset.banner = String(lastWeek.length > 0);
+    if (lastWeek.length === 0) return;
+    bannerWide.setMask(layoutText(`LAST WEEK   ${lastWeek.map((e) => `${e.rank}. ${boardName(e.name)} ${e.score}`).join('   ')}`));
+    bannerChampion.setMask(layoutText(`${boardName(lastWeek[0].name)} ${lastWeek[0].score}`));
+    banner.setAttribute('aria-label', `Last week's winners: ${lastWeek.map((e) => `${e.rank}. ${e.name}, ${e.score}`).join('; ')}`);
+  }
+
   // ── Config panel ──
   const config = createConfigPanel(hud, (parent, mask, className, tier) => add(parent, mask, className, tier, (v) => v.config, false), emit, emitSettings);
   let lastConfigOpen: boolean | null = null;
@@ -426,9 +460,14 @@ export function createHud(root: HTMLElement): Hud {
   const gameOverClassic = layoutText('G A M E  O V E R', { space: 7 });
   const gameOver = add(over, gameOverClassic, 'hud-game-over', 'big', isCrashed);
   let mode: Settings['mode'] = 'regular';
+  /** The last funny game-over line, and a replay's line to use instead of a random one. */
+  let crashLine = '';
+  let forcedLine: string | null = null;
   add(over, RESTART_ICON, 'hud-restart', 'big', isCrashed);
   const restartDesktop = layoutText('PRESS SPACE TO RESTART');
   const restartTouch = layoutText('TAP TO RESTART');
+  const againDesktop = layoutText('PRESS SPACE TO WATCH AGAIN');
+  const againTouch = layoutText('TAP TO WATCH AGAIN');
   const restartHint = add(over, restartDesktop, 'hud-hint', 'small', isCrashed);
 
   // ── Paused ──
@@ -452,7 +491,7 @@ export function createHud(root: HTMLElement): Hud {
   let measureNeeded = true;
   let colorKey = -1;
   let lastPhase: GamePhase | null = null;
-  let lastTouch: boolean | null = null;
+  let lastPrompts = '';
   let lastMode: CameraMode | 'custom' | null = null;
   let lastMuted: boolean | null = null;
   let lastDark: boolean | null = null;
@@ -547,8 +586,8 @@ export function createHud(root: HTMLElement): Hud {
     lastPhase = s.phase;
     hud.dataset.phase = s.phase;
     if (s.phase === 'crashed') {
-      const line = FUNNY_GAME_OVER[Math.floor(Math.random() * FUNNY_GAME_OVER.length)];
-      gameOver.setMask(mode !== 'regular' ? layoutText(line) : gameOverClassic);
+      crashLine = forcedLine ?? FUNNY_GAME_OVER[Math.floor(Math.random() * FUNNY_GAME_OVER.length)];
+      gameOver.setMask(mode !== 'regular' ? layoutText(crashLine) : gameOverClassic);
     }
     if (s.phase === 'crashed') status.textContent = `Game over. Score ${crashScore || s.score}.${newHighScore ? ' New high score!' : ''}`;
     else if (s.phase === 'paused') status.textContent = 'Paused.';
@@ -556,11 +595,15 @@ export function createHud(root: HTMLElement): Hud {
   }
 
   function updateContext(s: GameSnapshot, ctx: HudContext): void {
-    if (ctx.touch !== lastTouch) {
-      lastTouch = ctx.touch;
+    hud.dataset.replay = ctx.replay;
+    const prompts = `${ctx.touch} ${ctx.replay}`;
+    if (prompts !== lastPrompts) {
+      lastPrompts = prompts;
       hud.dataset.touch = String(ctx.touch);
+      // A replay that has played out offers to play again from its game-over screen.
+      const again = ctx.replay === 'over' ? (ctx.touch ? againTouch : againDesktop) : null;
       press.setMask(ctx.touch ? pressTouch : pressDesktop);
-      restartHint.setMask(ctx.touch ? restartTouch : restartDesktop);
+      restartHint.setMask(again ?? (ctx.touch ? restartTouch : restartDesktop));
       resumeHint.setMask(ctx.touch ? resumeTouch : resumeDesktop);
     }
     // An orbited view reads CUSTOM until the next switch.
@@ -653,14 +696,15 @@ export function createHud(root: HTMLElement): Hud {
   }
 
   function setBoard(view: BoardView): void {
-    const key = JSON.stringify(view);
+    const key = JSON.stringify([view, period]);
     if (key === boardKey) return;
     boardKey = key;
+    const rows = shownRows(view);
     // Deleted stats: copy the player's row off the old board before it is redrawn.
     let decay: (() => void) | null = null;
     if (view.statsDeleted && view.statsDeleted !== animatedDelete) {
       animatedDelete = view.statsDeleted;
-      const gone = boardView?.entries.findIndex((e) => e.me) ?? -1;
+      const gone = shownRows(boardView).findIndex((e) => e.me);
       if (gone >= 0) {
         const old = rowCanvases[gone].el;
         const copy = document.createElement('canvas');
@@ -668,17 +712,18 @@ export function createHud(root: HTMLElement): Hud {
         copy.height = old.height;
         copy.getContext('2d')?.drawImage(old, 0, 0);
         const rect = old.getBoundingClientRect();
-        const pitch = rowPitch(rowCanvases.slice(0, boardView!.entries.length).map((c) => c.el));
+        const pitch = rowPitch(rowCanvases.slice(0, shownRows(boardView).length).map((c) => c.el));
         decay = () => {
           // Stand the copy in for the old row (same box), then let it decay.
           copy.getBoundingClientRect = () => rect;
-          decayRow(copy, [...rowCanvases.slice(gone, view.entries.length).map((c) => c.el), boardNote.el], pitch);
+          decayRow(copy, [...rowCanvases.slice(gone, rows.length).map((c) => c.el), boardNote.el], pitch);
         };
       }
     }
     boardView = view;
     hud.dataset.account = view.account;
-    view.entries.forEach((e, i) => {
+    setBanner(view.account === 'signedIn' ? view.lastWeek : []);
+    rows.forEach((e, i) => {
       if (!rowCanvases[i]) rowCanvases.push(add(boardRows, createMask(1, GLYPH_H), 'hud-board-row', 'small', isMenu));
       rowCanvases[i].setMask(boardRow(e, e.me ? 1 : 2));
       rowCanvases[i].el.classList.toggle('hud-board-me', e.me);
@@ -687,17 +732,19 @@ export function createHud(root: HTMLElement): Hud {
       else rowCanvases[i].el.removeAttribute('title');
       rowCanvases[i].el.hidden = false;
     });
-    for (let i = view.entries.length; i < rowCanvases.length; i++) rowCanvases[i].el.hidden = true;
+    for (let i = rows.length; i < rowCanvases.length; i++) rowCanvases[i].el.hidden = true;
+    // The rank-up slide follows the all-time board (this week's has no "before" to slide from).
     if (view.newBest && view.newBest !== animatedBest) {
       animatedBest = view.newBest;
-      animateNewBest(view);
+      if (period === 'all') animateNewBest(view);
     }
     decay?.();
-    boardNote.setMask(layoutText(view.note));
+    const emptyWeek = period === 'week' && rows.length === 0 && view.account === 'signedIn';
+    boardNote.setMask(layoutText(view.note || (emptyWeek ? 'NO RUNS THIS WEEK YET' : '')));
     liveLine.setMask(layoutText(view.live));
     // Screen readers get the board as text.
     boardList.replaceChildren(
-      ...view.entries.map((e) => {
+      ...rows.map((e) => {
         const li = document.createElement('li');
         li.textContent = `${e.rank}. ${e.name}${e.me ? ' (you)' : ''}: ${e.score}${speedNote(e) ? `, ${speedNote(e)}` : ''}${e.mobile ? ', on mobile' : ''}`;
         return li;
@@ -734,7 +781,7 @@ export function createHud(root: HTMLElement): Hud {
 
     crownRest() {
       const row = rowCanvases[0]?.el;
-      if (!row || row.hidden || (boardView?.entries.length ?? 0) === 0) return null;
+      if (!row || row.hidden || shownRows(boardView).length === 0) return null;
       const spot = crownAnchor.el.getBoundingClientRect();
       const rect = row.getBoundingClientRect();
       if (rect.height === 0) return null;
@@ -743,12 +790,26 @@ export function createHud(root: HTMLElement): Hud {
       return { right: spot.right, baseline: rect.bottom - pad, height: rect.height - 2 * pad, opacity: Number(getComputedStyle(boardBox).opacity) };
     },
 
+    setCrashLine(line) {
+      forcedLine = line;
+    },
+
+    get crashLine() {
+      return crashLine;
+    },
+
     celebrate() {
       confetti.burst();
     },
 
     update(s: GameSnapshot, ctx: HudContext): void {
-      mode = ctx.settings.mode;
+      if (ctx.settings.boardPeriod !== period) {
+        period = ctx.settings.boardPeriod;
+        for (const [which, b] of Object.entries(tabs)) b.setAttribute('aria-pressed', String(which === period));
+        hud.dataset.boardPeriod = period;
+        if (boardView) setBoard(boardView);
+      }
+      mode = ctx.mode;
       measure();
       updateColors(s.night);
       updatePhase(s);

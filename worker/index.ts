@@ -5,7 +5,7 @@ import { allowedOrigins, callback, currentUser, devLogin, login, logout } from '
 import { adminRuns, adminSetRun, adminSetUser, adminUsers, leaderboard } from './board';
 import type { Env } from './env';
 import { HttpError, json } from './http';
-import { beat, deleteRuns, finishRun, getRun, startRun } from './runs';
+import { beat, deleteRuns, finishRun, getRun, myRuns, startRun } from './runs';
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
   const { method } = request;
@@ -24,6 +24,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (method === 'GET' && path === '/api/leaderboard') return leaderboard(request, env);
   if (method === 'POST' && path === '/api/runs') return startRun(request, env);
   if (method === 'POST' && path === '/api/runs/delete') return deleteRuns(request, env);
+  if (method === 'GET' && path === '/api/runs/mine') return myRuns(request, env);
   if (method === 'GET' && path === '/api/admin/runs') return adminRuns(request, env, url);
   if (method === 'GET' && path === '/api/admin/users') return adminUsers(request, env);
 

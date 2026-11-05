@@ -33,7 +33,7 @@ self.addEventListener('fetch', (event) => {
 
   // The game page: network first so a new deploy shows up right away, the cached shell when
   // offline. Query strings (?cam=, ?theme=...) all map to the same shell. Other pages
-  // (admin.html) are online-only.
+  // (admin.html, runs.html) are online-only.
   if (request.mode === 'navigate') {
     if (url.pathname !== SCOPE_PATH && url.pathname !== `${SCOPE_PATH}index.html`) return;
     event.respondWith(

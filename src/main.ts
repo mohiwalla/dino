@@ -1,6 +1,7 @@
 import './style.css';
 import * as THREE from 'three';
 import { createSfx } from './audio/sfx';
+import { revealPage } from './curtain';
 import { MULTIPLIERS, PALETTE, SIM, STORAGE_KEYS } from './config';
 import { createInput } from './input/input';
 import { createCameraRig } from './render/camera';
@@ -8,7 +9,7 @@ import { createEntities } from './render/entities';
 import { CROWN_HEIGHT, CROWN_WIDTH } from './render/entities-trex';
 import { createModelLibrary } from './render/models';
 import { createWorld } from './render/world';
-import { api, ApiError } from './net/api';
+import { api, ApiError, type StoredRun } from './net/api';
 import { createRanked } from './net/ranked';
 import { autopilot } from './sim/autopilot';
 import { createGameSim } from './sim/game';
@@ -25,6 +26,8 @@ import {
   type GameSnapshot,
   type HudContext,
   type InputFrame,
+  type LookState,
+  type RunLook,
   type Settings,
   type UiAction,
 } from './types';
@@ -45,6 +48,15 @@ const CROWN_REST_DISTANCE = 60;
 /** Resuming counts down 3, 2, 1 at this pace before the run moves again. */
 const RESUME_COUNT = 3;
 const RESUME_STEP_MS = 700;
+/** How a replay of a run from before looks were saved looks: the game's defaults. */
+const DEFAULT_LOOK: LookState = { mode: 'regular', farts: false, nsfw: false, dayNight: true, dark: false, camera: { mode: CAMERA_MODES[0], custom: false, yaw: 0, pitch: 0 } };
+/** Camera drags are noted at most this often (steps) in a run's look; the replay eases between. */
+const LOOK_CAMERA_STEPS = 4;
+/** A replay opens on its player's first screen this long (ms), and waits at most REPLAY_CLIP_WAIT_MS for its crash clip. */
+const REPLAY_OPEN_MS = 900;
+const REPLAY_CLIP_WAIT_MS = 3000;
+/** And a run notes at most this many look changes. */
+const MAX_LOOK_CHANGES = 2000;
 const NO_INPUT: InputFrame = Object.freeze({ jumpPressed: false, jumpHeld: false, duckHeld: false, restartPressed: false });
 
 const params = new URLSearchParams(location.search);
@@ -151,6 +163,31 @@ function main(): void {
   /** ?replay=<run id>: plays a stored leaderboard run back (src/sim/replay.ts). */
   const replayId = params.get('replay');
   let replay: { next(): InputFrame; left: number } | null = null;
+  /** The replayed run's look (null: an old run, shown with the defaults), and whether its player cheered it. */
+  let replayLook: RunLook | null = null;
+  let replayCheered = false;
+  /** The look the replay shows now, and the next of its changes to apply. */
+  let replayState: LookState | null = null;
+  let replayChange = 0;
+  /** The stored run being replayed, kept to watch it again. */
+  let replayRun: StoredRun | null = null;
+  /** Until when (performance.now()) the replay shows its opening screen, and may wait for its crash clip to load. */
+  let replayOpen = 0;
+  let replayHold = 0;
+  /** The board's line once the replay has played out: with the run's score. */
+  let replayEnd = '';
+  /** Steps since the current run started: when a look change happened (recorded, and replayed). */
+  let runStep = 0;
+  /** The look being recorded for this run: as it started, its changes since, and the latest; null when not recording. */
+  let lookStart: LookState | null = null;
+  let lookChanges: [number, Partial<LookState>][] = [];
+  let lookLast: LookState | null = null;
+  let lookCameraStep = 0;
+  /** The high score on screen as this run started, and the seed of its fart sounds (RunLook). */
+  let runHi = 0;
+  let runFx = 0;
+  /** The T-Rex wore the crown as this run started (RunLook.crown). */
+  let runCrown = false;
   /** What the replay shows in place of the leaderboard's lines, once it has loaded (or failed). */
   let replayLabel: Pick<BoardView, 'note' | 'live'> | null = replayId ? { note: 'LOADING REPLAY', live: '' } : null;
   let board: BoardView | null = null;
@@ -176,6 +213,7 @@ function main(): void {
     muted: sfx.muted,
     ranked: readStorage(STORAGE_KEYS.ranked) !== '0',
     showBoard: readStorage(STORAGE_KEYS.showBoard) !== '0',
+    boardPeriod: readStorage(STORAGE_KEYS.boardPeriod) === 'week' ? 'week' : 'all',
     multiplier: readMultiplier(),
     mode: readMode(),
     // Funny and NSFW modes used to fart; NSFW mode also had the NSFW clips (with the safe ones).
@@ -223,23 +261,73 @@ function main(): void {
   let starDue = false;
   let gamesThisVisit = 0;
   let celebratedBest: BoardView['newBest'] = null;
-  const hudCtx: HudContext = { cameraMode: rig.mode, cameraCustom: false, settings, configOpen, starOpen, dark, touch: input.touch, fps: null, resumeIn: null };
+  const hudCtx: HudContext = { cameraMode: rig.mode, cameraCustom: false, settings, configOpen, starOpen, dark, touch: input.touch, fps: null, resumeIn: null, replay: 'off', mode: look().mode };
   applyPageTheme(dark);
   entities.setDebug(debug);
   applyFun();
 
+  /**
+   * The settings that change how a run looks and sounds. A replay keeps its player's (from the
+   * run's RunLook), whatever the viewer picks; only the sound level and mute are the viewer's.
+   */
+  function look(): Pick<Settings, 'mode' | 'farts' | 'nsfw' | 'dayNight'> {
+    return replayId ? (replayState ?? DEFAULT_LOOK) : settings;
+  }
+
+  /** The player's look right now. */
+  function lookState(): LookState {
+    const v = rig.view;
+    const round = (a: number) => Math.round(a * 1e4) / 1e4;
+    return { mode: settings.mode, farts: settings.farts, nsfw: settings.nsfw, dayNight: settings.dayNight, dark, camera: { ...v, yaw: round(v.yaw), pitch: round(v.pitch) } };
+  }
+
+  /** Notes what changed in the player's look since last noted (camera drags at most every few steps, unless `final`). */
+  function recordLook(final = false): void {
+    if (!lookLast || lookChanges.length >= MAX_LOOK_CHANGES) return;
+    const now = lookState();
+    const change: Partial<LookState> = {};
+    for (const key of ['mode', 'farts', 'nsfw', 'dayNight', 'dark'] as const) if (now[key] !== lookLast[key]) Object.assign(change, { [key]: now[key] });
+    const [a, b] = [now.camera, lookLast.camera];
+    const switched = a.mode !== b.mode || a.custom !== b.custom;
+    const turned = a.yaw !== b.yaw || a.pitch !== b.pitch;
+    if (switched || (turned && (final || runStep - lookCameraStep >= LOOK_CAMERA_STEPS))) {
+      change.camera = a;
+      lookCameraStep = runStep;
+    }
+    if (Object.keys(change).length === 0) return;
+    lookChanges.push([runStep, change]);
+    lookLast = { ...lookLast, ...change };
+  }
+
+  /** What a ranked run saves for its replay: the player's look over the run and what came up at random. */
+  function runLook(): RunLook {
+    return { ...(lookStart ?? lookState()), changes: lookChanges, hi: runHi, crown: runCrown, fx: runFx, clip: sfx.crashClip, line: hud.crashLine, move: entities.crashMove };
+  }
+
+  /** A replay shows its player's look: settings, theme and camera. */
+  function showLook(state: LookState): void {
+    const before = replayState;
+    replayState = state;
+    if (state.dark !== dark) {
+      dark = state.dark;
+      applyPageTheme(dark);
+    }
+    rig.setView(state.camera);
+    if (!before || before.mode !== state.mode || before.farts !== state.farts || before.nsfw !== state.nsfw) applyFun();
+  }
+
   /** Funny mode's crash, the farts setting's jumps, and the clips either of them plays. */
   function applyFun(): void {
-    const funny = settings.mode === 'funny';
+    const funny = look().mode === 'funny';
     entities.setFunny(funny);
     entities.setFarts(farting());
     rig.setFunny(funny);
-    if (funny) sfx.preloadFunny(settings.nsfw);
+    if (funny) sfx.preloadFunny(look().nsfw);
   }
 
   /** Farts are a funny-mode option, like NSFW: the setting only counts in funny mode. */
   function farting(): boolean {
-    return settings.mode === 'funny' && settings.farts;
+    return look().mode === 'funny' && look().farts;
   }
 
   function resize(): void {
@@ -271,6 +359,7 @@ function main(): void {
       if (starAsk === 'later' && rank <= 3) starDue = true;
     },
     onAdmin: () => exposeDebugHooks(),
+    look: runLook,
     onView: (view) => {
       board = view;
       showBoard();
@@ -286,19 +375,54 @@ function main(): void {
     api
       .run(id)
       .then((run) => {
-        sim = createRunSim(run);
-        pace = run.multiplier ?? 1;
-        const cursor = createInputCursor(run.inputs);
-        replay = { next: () => cursor.next(), left: run.steps };
-        curr = prev = sim.getSnapshot();
-        const name = run.name.toUpperCase();
-        replayLabel = { note: `REPLAY · ${name} · ${run.score ?? 0}`, live: `REPLAY · ${name}` };
-        showBoard();
+        replayRun = run;
+        playReplay(run);
       })
       .catch((err: unknown) => {
         replayLabel = { note: err instanceof ApiError && err.status === 401 ? 'SIGN IN TO WATCH REPLAYS' : 'REPLAY NOT FOUND', live: '' };
         showBoard();
       });
+  }
+
+  /** The replay again from its start: the scene resets as for a restart, then the run plays out. */
+  function watchAgain(run: StoredRun): void {
+    sfx.stopFunny();
+    frameEvents.push({ type: 'restart' });
+    playReplay(run);
+  }
+
+  /** Plays the stored run from its start: on load, and again when the viewer asks to watch it again. */
+  function playReplay(run: StoredRun): void {
+    sim = createRunSim(run);
+    pace = run.multiplier ?? 1;
+    const cursor = createInputCursor(run.inputs);
+    replay = { next: () => cursor.next(), left: run.steps };
+    replayCheered = run.cheered;
+    replayChange = 0;
+    // Shown exactly as its player saw it: their look from the start (or the defaults, for a run from
+    // before looks were saved), their high score, and their crash clip, line and move.
+    const l = run.look;
+    replayLook = l && { ...l, camera: l.camera ?? DEFAULT_LOOK.camera, changes: l.changes ?? [] };
+    const { mode, farts, nsfw, dayNight, dark: lookDark, camera } = replayLook ?? DEFAULT_LOOK;
+    showLook({ mode, farts, nsfw, dayNight, dark: lookDark, camera });
+    darkBlend = dark ? 1 : 0;
+    if (replayLook) {
+      sim.setHighScore(replayLook.hi ?? 0);
+      entities.setCrashMove(replayLook.move);
+      hud.setCrashLine(replayLook.line);
+      // The crash sounds as it did: the clip its player heard, or the synthesised sound if none had loaded
+      // yet (never a random one). The mode that counts is the one at the crash, after any changes.
+      const atCrash = replayLook.changes.reduce<LookState>((s, [, change]) => ({ ...s, ...change }), replayLook);
+      if (atCrash.mode === 'funny' && !run.cheered) sfx.queueCrash(replayLook.clip ?? '');
+    }
+    replayOpen = performance.now() + REPLAY_OPEN_MS;
+    replayHold = performance.now() + REPLAY_CLIP_WAIT_MS;
+    curr = prev = sim.getSnapshot();
+    const name = run.name.toUpperCase();
+    // The score shows once the replay has played out, not before.
+    replayLabel = { note: `REPLAY · ${name}`, live: `REPLAY · ${name}` };
+    replayEnd = `REPLAY · ${name} · ${run.score ?? 0}`;
+    showBoard();
   }
 
   function applySettings(change: Partial<Settings>): void {
@@ -313,6 +437,7 @@ function main(): void {
       if (!change.ranked) ranked.forfeit();
     }
     if (change.showBoard !== undefined) writeStorage(STORAGE_KEYS.showBoard, change.showBoard ? '1' : '0');
+    if (change.boardPeriod !== undefined) writeStorage(STORAGE_KEYS.boardPeriod, change.boardPeriod);
     // From the next run on: a run keeps the pace it started at (the server holds it to that).
     if (change.multiplier !== undefined) writeStorage(STORAGE_KEYS.multiplier, String(change.multiplier));
     if (change.mode !== undefined) writeStorage(STORAGE_KEYS.mode, change.mode);
@@ -351,7 +476,7 @@ function main(): void {
     sfx.play('victory');
     // The crown flies from the board onto the dancing T-Rex (once the board is up: an unranked best
     // celebrates at the crash itself), and back when the next run starts.
-    if (!replay && !crownedNow) crownDue = true;
+    if (!crownedNow) crownDue = true;
   }
 
   function togglePause(): void {
@@ -360,7 +485,9 @@ function main(): void {
       ranked.paused();
       curr = prev = sim.getSnapshot();
     } else if (curr.phase === 'paused') {
-      resumeAt = resumeAt === null ? performance.now() + RESUME_COUNT * RESUME_STEP_MS : null;
+      // A replay has nothing to get ready for: it picks up at once.
+      if (replayId) resume();
+      else resumeAt = resumeAt === null ? performance.now() + RESUME_COUNT * RESUME_STEP_MS : null;
     }
   }
 
@@ -375,6 +502,7 @@ function main(): void {
   function onAction(action: UiAction): void {
     switch (action) {
       case 'toggleCamera':
+        if (replayId) break; // a replay keeps its player's camera
         rig.cycle();
         if (!rig.custom) writeStorage(STORAGE_KEYS.cameraMode, rig.mode);
         break;
@@ -382,7 +510,7 @@ function main(): void {
         applySettings({ muted: !settings.muted });
         break;
       case 'toggleTheme':
-        toggleTheme();
+        if (!replayId) toggleTheme(); // and their theme
         break;
       case 'togglePause':
       case 'escape':
@@ -444,6 +572,16 @@ function main(): void {
       else if (e.type === 'start' || e.type === 'restart') {
         sfx.stopFunny();
         if (!replay) pace = settings.multiplier;
+        runStep = 0;
+        runFx = replayId ? (replayLook?.fx ?? 0) : Math.floor(Math.random() * 2 ** 32);
+        sfx.seedFarts(runFx);
+        if (!replayId) {
+          runHi = prev.highScore;
+          runCrown = crownOn;
+          lookStart = lookLast = lookState();
+          lookChanges = [];
+          lookCameraStep = 0;
+        }
         // The crown, if it was on the T-Rex, flies to the board.
         if (crownOn) {
           // The board stays a moment to catch it.
@@ -458,15 +596,19 @@ function main(): void {
       }
       else if (e.type === 'milestone') sfx.play('milestone');
       else if (e.type === 'crash') {
+        // The look stops being recorded with the run.
+        recordLook(true);
+        lookLast = null;
         // A win gets the fanfare instead of the crash sound. An unranked run beating the last best
         // is one now; a ranked run is one if it beats the player's board best (or is their first),
         // and its party waits for the server's rank.
-        const localWin = !replay && !autoplay && e.newHighScore && prev.highScore > 0 && !ranked.lastRunRanked;
+        // A replay cheers where its player did.
+        const localWin = replay ? replayCheered : !autoplay && e.newHighScore && prev.highScore > 0 && !ranked.lastRunRanked;
         const boardBest = board?.entries.find((b) => b.me)?.score ?? null;
-        const rankedWin = ranked.lastRunRanked && (boardBest === null || e.score > boardBest);
-        if (!localWin && !rankedWin) sfx.play(settings.mode === 'funny' ? 'slide' : 'crash');
+        const rankedWin = !replay && ranked.lastRunRanked && (boardBest === null || e.score > boardBest);
+        if (!localWin && !rankedWin) sfx.play(look().mode === 'funny' ? 'slide' : 'crash');
         // Funny crashes move to the clip's hits; it starts now, and the T-Rex hears the crash next.
-        entities.setCrashBeats(settings.mode === 'funny' && !localWin && !rankedWin ? sfx.crashBeats : []);
+        entities.setCrashBeats(look().mode === 'funny' && !localWin && !rankedWin ? sfx.crashBeats : []);
         if (!replay) writeStorage(STORAGE_KEYS.highScore, String(curr.highScore));
         if (localWin) celebrate();
         if (!replay && !autoplay && ++gamesThisVisit === 2 && starAsk === null) starDue = true;
@@ -475,12 +617,22 @@ function main(): void {
   }
 
   function nextInput(manual: InputFrame | null): InputFrame {
-    if (replay && replay.left > 0) {
-      replay.left--;
-      input.sample(); // drop the player's presses while the replay plays
-      return replay.next();
+    if (replayId) {
+      // A replay plays by itself; the viewer's presses are dropped, except that once it has played out
+      // (and the game-over screen settles, as for a restart) one watches it again from the start.
+      const press = input.sample();
+      if (!replay) return NO_INPUT;
+      // It opens on the player's first screen for a moment (with their crown, if they wore it), and waits
+      // (briefly) for the crash clip to load, so a short run doesn't crash before it can play.
+      const now = performance.now();
+      if (replay.left === replayRun?.steps && (now < replayOpen || (!sfx.crashReady && now < replayHold))) return NO_INPUT;
+      if (replay.left > 0) {
+        replay.left--;
+        return replay.next();
+      }
+      if (replayRun && curr.phase === 'crashed' && curr.canRestart && (press.jumpPressed || press.restartPressed)) watchAgain(replayRun);
+      return NO_INPUT;
     }
-    if (replayLabel?.note === 'LOADING REPLAY') return NO_INPUT;
     return autoplay ? autopilot(curr) : (manual ?? input.sample());
   }
 
@@ -488,10 +640,12 @@ function main(): void {
     const frame = nextInput(manual);
     const advances = curr.phase !== 'paused';
     const events = sim.step(frame);
-    if (advances) ranked.stepped(frame, events);
+    // A replay is not a run of the viewer's: the ranked tracker would also reseed its course.
+    if (advances && !replayId) ranked.stepped(frame, events);
     prev = curr;
     curr = sim.getSnapshot();
     collect(events);
+    if (advances) runStep++;
   }
 
   /** While paused nothing steps; P / Escape (UiAction) or a tap / Space resumes. Presses during the countdown are dropped. */
@@ -511,15 +665,22 @@ function main(): void {
 
   function present(alpha: number, dtMs: number): void {
     dispatch();
+    // A ranked run notes the player's look as it changes; a replay shows those changes at the same steps.
+    recordLook();
+    const changes = replayLook?.changes ?? [];
+    while (replay && replayState && replayChange < changes.length && changes[replayChange][0] <= runStep) showLook({ ...replayState, ...changes[replayChange++][1] });
     const target = dark ? 1 : 0;
     darkBlend += Math.sign(target - darkBlend) * Math.min(Math.abs(target - darkBlend), dtMs / THEME_FADE_MS);
     // With the cycle off the sim's night is ignored, leaving just the theme.
-    Object.assign(shownPrev, prev).night = themedNight(settings.dayNight ? prev.night : 0, darkBlend);
-    Object.assign(shownCurr, curr).night = themedNight(settings.dayNight ? curr.night : 0, darkBlend);
+    Object.assign(shownPrev, prev).night = themedNight(look().dayNight ? prev.night : 0, darkBlend);
+    Object.assign(shownCurr, curr).night = themedNight(look().dayNight ? curr.night : 0, darkBlend);
     models.setNight(shownCurr.night);
     // The T-Rex wears the crown on the title screen if it is #1, and on a game-over screen it is
     // celebrating on; otherwise the crown rests by the board.
-    crownOn = !replay && ((first && curr.phase === 'title') || (crownedNow && curr.phase === 'crashed'));
+    // A replay shows its player's crown: on the T-Rex until the run starts (it then flies off to the board,
+    // as above), and flown back in if they celebrated at the crash.
+    const wearing = replayId ? replay !== null && replay.left === replayRun?.steps && replayLook?.crown === true : first && curr.phase === 'title';
+    crownOn = wearing || (crownedNow && curr.phase === 'crashed');
     entities.setCrown(crownOn);
     // The crown rests by the board's first place unless the leader's T-Rex is wearing it.
     entities.setBoardCrown(crownOn ? null : crownSpot);
@@ -533,6 +694,13 @@ function main(): void {
     hudCtx.dark = dark;
     hudCtx.touch = input.touch;
     hudCtx.fps = debug ? fps : null;
+    const loading = replayLabel?.note === 'LOADING REPLAY';
+    hudCtx.replay = !replayId ? 'off' : !replay ? (loading ? 'loading' : 'over') : replay.left > 0 ? 'playing' : 'over';
+    if (replay && hudCtx.replay === 'over' && replayLabel && replayEnd && replayLabel.note !== replayEnd) {
+      replayLabel = { ...replayLabel, note: replayEnd };
+      showBoard();
+    }
+    hudCtx.mode = look().mode;
     hudCtx.resumeIn = resumeAt === null ? null : Math.max(1, Math.ceil((resumeAt - performance.now()) / RESUME_STEP_MS));
     hud.update(shownCurr, hudCtx);
     if (crownDue && curr.phase === 'crashed' && hud.crownRest()) {
@@ -589,7 +757,9 @@ function main(): void {
   }
 
   // Middle-drag, Ctrl/Cmd + Shift + drag or two fingers orbit the camera, like Blender.
-  input.onOrbit((dx, dy) => rig.orbit(-dx * ORBIT_PER_PX, dy * ORBIT_PER_PX));
+  input.onOrbit((dx, dy) => {
+    if (!replayId) rig.orbit(-dx * ORBIT_PER_PX, dy * ORBIT_PER_PX);
+  });
 
   input.onAction(onAction);
   hud.onAction(onAction);
@@ -633,6 +803,8 @@ function main(): void {
   if (replayId) loadReplay(replayId);
   present(0, 0);
   requestAnimationFrame(frame);
+  // Arrived from another page under its curtain: it lifts once the game has drawn a couple of frames.
+  requestAnimationFrame(() => requestAnimationFrame(revealPage));
 }
 
 /** Offline support (production builds only; a service worker would fight Vite's dev server). */

@@ -1,7 +1,7 @@
 // Chrome's Horizon obstacle logic: spawning (type / size / gap rules), movement, despawning.
 // RUNNER.SPAWN_X plays the role of Chrome's canvas width.
 
-import { CACTUS_VARIANTS, OBSTACLES, RUNNER } from '../config';
+import { CACTUS_VARIANTS, OBSTACLES, RUNNER, type ObstacleTypeConfig } from '../config';
 import type { Box, GameEvent, ObstacleKind, ObstacleSnapshot } from '../types';
 import { obstacleCollisionBoxes } from './collision';
 import { randomInt, type Random } from './rng';
@@ -33,6 +33,8 @@ export interface ObstacleField {
   readonly history: ObstacleKind[];
   /** Never reset, so ids stay unique for the sim's lifetime. */
   nextId: number;
+  /** Chrome's obstacle rules, for runs recorded before SIM_VERSION 3 (see RUNNER.PTERODACTYL_SHARE). */
+  readonly classic: boolean;
 }
 
 const FRAME_STEPS: Record<ObstacleKind, number> = {
@@ -41,8 +43,8 @@ const FRAME_STEPS: Record<ObstacleKind, number> = {
   pterodactyl: msToSteps(OBSTACLES.pterodactyl.frameMs),
 };
 
-export function createObstacleField(): ObstacleField {
-  return { list: [], history: [], nextId: 1 };
+export function createObstacleField(classic = false): ObstacleField {
+  return { list: [], history: [], nextId: 1, classic };
 }
 
 /** Empties the field for a new run; every removed obstacle gets a despawn event. */
@@ -92,13 +94,16 @@ function removeDespawned(list: Obstacle[], events: GameEvent[]): void {
 
 /** Chrome Horizon.addNewObstacle + Obstacle.init. Records the kind in the history. */
 export function spawnObstacle(field: ObstacleField, speed: number, random: Random, mobile: boolean, x: number = RUNNER.SPAWN_X): Obstacle {
-  const kind = pickKind(field.history, speed, random);
-  const type = OBSTACLES[kind];
+  const kind = field.classic ? pickClassicKind(field.history, speed, random) : pickKind(field.history, random);
+  const type: ObstacleTypeConfig = OBSTACLES[kind];
   let size = randomInt(random, 1, RUNNER.MAX_OBSTACLE_LENGTH);
   if (type.multipleSpeed > speed) size = 1;
-  const width = type.width * size;
   const heights = mobile ? type.yUpMobile : type.yUp;
   const y = heights[randomInt(random, 0, heights.length - 1)];
+  // A pterodactyl at stackY comes as a stacked pair (size 2): duck-only.
+  const stacked = !field.classic && kind === 'pterodactyl' && y === type.stackY;
+  if (stacked) size = 2;
+  const width = stacked ? type.width : type.width * size;
   const speedOffset = type.speedOffset === 0 ? 0 : random() > 0.5 ? type.speedOffset : -type.speedOffset;
   const minGap = Math.round(width * speed * gapSpeedScale(speed) + type.minGap * RUNNER.GAP_COEFFICIENT);
   const gap = randomInt(random, minGap, Math.round(minGap * RUNNER.MAX_GAP_COEFFICIENT));
@@ -115,7 +120,7 @@ export function spawnObstacle(field: ObstacleField, speed: number, random: Rando
     x,
     y,
     width,
-    height: type.height,
+    height: stacked ? type.height + (type.stackGap ?? 0) : type.height,
     frame: 0,
     frameSteps: 0,
     speedOffset,
@@ -130,7 +135,16 @@ export function gapSpeedScale(speed: number): number {
   return 1 - (1 - RUNNER.GAP_SPEED_SCALE_AT_MAX) * t;
 }
 
-function pickKind(history: readonly ObstacleKind[], speed: number, random: Random): ObstacleKind {
+/** One obstacle in five a pterodactyl (from the start of a run), the rest cacti half and half. */
+function pickKind(history: readonly ObstacleKind[], random: Random): ObstacleKind {
+  for (;;) {
+    const kind: ObstacleKind = random() < RUNNER.PTERODACTYL_SHARE ? 'pterodactyl' : random() < 0.5 ? 'cactusSmall' : 'cactusLarge';
+    if (!isDuplicate(history, kind)) return kind;
+  }
+}
+
+/** Chrome's pick, for runs recorded before SIM_VERSION 3: even among the kinds allowed at the speed. */
+function pickClassicKind(history: readonly ObstacleKind[], speed: number, random: Random): ObstacleKind {
   for (;;) {
     const kind = OBSTACLE_KINDS[randomInt(random, 0, OBSTACLE_KINDS.length - 1)];
     if (!isDuplicate(history, kind) && speed >= OBSTACLES[kind].minSpeed) return kind;
@@ -147,7 +161,7 @@ export function isDuplicate(history: readonly ObstacleKind[], kind: ObstacleKind
 }
 
 function pickVariants(kind: ObstacleKind, size: number, random: Random): number[] {
-  if (kind === 'pterodactyl') return [0];
+  if (kind === 'pterodactyl') return new Array<number>(size).fill(0);
   const variants: number[] = [];
   for (let i = 0; i < size; i++) variants.push(randomInt(random, 0, CACTUS_VARIANTS[kind] - 1));
   return variants;

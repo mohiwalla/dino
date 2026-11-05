@@ -1,5 +1,7 @@
 // The leaderboard server's HTTP API (worker/), same origin as the game.
 
+import type { RunLook } from '../types';
+
 export interface Account {
   name: string;
   email: string;
@@ -18,10 +20,18 @@ export interface BoardEntryData {
   me: boolean;
 }
 
-export interface BoardData {
+export interface BoardList {
   entries: BoardEntryData[];
   me: { rank: number; score: number } | null;
   players: number;
+}
+
+/** All time at the top level, this week (Monday to Sunday, India time) under `week`. */
+export interface BoardData extends BoardList {
+  week?: BoardList;
+  /** Last week's top 3, and whether they are still news (the first days of the week). */
+  lastWeek?: BoardEntryData[];
+  announce?: boolean;
 }
 
 export interface FinishResult {
@@ -40,8 +50,13 @@ export interface StoredRun {
   afterCrash: boolean;
   fast: boolean;
   multiplier: number;
+  simVersion: number;
   steps: number;
   inputs: number[];
+  /** How the run looked and sounded to its player; null for runs from before it was saved. */
+  look: RunLook | null;
+  /** The player cheered this run as a new best. */
+  cheered: boolean;
 }
 
 export class ApiError extends Error {
@@ -72,7 +87,7 @@ export const api = {
   leaderboard: () => call<BoardData>('leaderboard'),
   startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
   beat: (id: string, body: { steps: number; inputs: number[] }) => call<{ ok: true }>(`runs/${id}/beat`, body),
-  finish: (id: string, body: { steps: number; inputs: number[] }) => call<FinishResult>(`runs/${id}/finish`, body),
+  finish: (id: string, body: { steps: number; inputs: number[]; look: RunLook }) => call<FinishResult>(`runs/${id}/finish`, body),
   run: (id: string) => call<StoredRun>(`runs/${encodeURIComponent(id)}`),
   logout: () => call<{ ok: true }>('auth/logout', {}),
   deleteRuns: () => call<{ ok: true }>('runs/delete', {}),
