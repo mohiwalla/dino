@@ -13,9 +13,9 @@ export const SIM = {
 /** Chrome Runner.config, plus our 3D spawn window. */
 /**
  * Game speed multipliers a player can pick (Settings.multiplier): the whole game runs this much
- * faster or slower in real time. The sim is untouched, so a run replays the same at any speed.
+ * faster in real time. The sim is untouched, so a run replays the same at any speed.
  */
-export const MULTIPLIERS: readonly number[] = [0.5, 1, 1.5, 2, 2.5, 3];
+export const MULTIPLIERS: readonly number[] = [1, 1.25, 1.5, 1.75, 2];
 
 export const RUNNER = {
   SPEED: 6,

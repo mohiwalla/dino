@@ -36,6 +36,10 @@ const MAX_FRAME_MS = 250;
 const FPS_SMOOTHING = 0.05;
 /** How long the light <-> dark theme cross-fade takes. */
 const THEME_FADE_MS = 600;
+/** Camera orbit speed, radians per CSS px dragged. */
+const ORBIT_PER_PX = 0.006;
+/** On menus, how long a first finger waits for a second before it counts as a tap. */
+const TOUCH_GESTURE_MS = 80;
 /** How far in front of the camera the crown rests by the board (scene px). */
 const CROWN_REST_DISTANCE = 60;
 /** Resuming counts down 3, 2, 1 at this pace before the run moves again. */
@@ -219,7 +223,7 @@ function main(): void {
   let starDue = false;
   let gamesThisVisit = 0;
   let celebratedBest: BoardView['newBest'] = null;
-  const hudCtx: HudContext = { cameraMode: rig.mode, settings, configOpen, starOpen, dark, touch: input.touch, fps: null, resumeIn: null };
+  const hudCtx: HudContext = { cameraMode: rig.mode, cameraCustom: false, settings, configOpen, starOpen, dark, touch: input.touch, fps: null, resumeIn: null };
   applyPageTheme(dark);
   entities.setDebug(debug);
   applyFun();
@@ -371,7 +375,8 @@ function main(): void {
   function onAction(action: UiAction): void {
     switch (action) {
       case 'toggleCamera':
-        setCameraMode(CAMERA_MODES[(CAMERA_MODES.indexOf(rig.mode) + 1) % CAMERA_MODES.length]);
+        rig.cycle();
+        if (!rig.custom) writeStorage(STORAGE_KEYS.cameraMode, rig.mode);
         break;
       case 'toggleMute':
         applySettings({ muted: !settings.muted });
@@ -522,6 +527,7 @@ function main(): void {
     entities.update(shownPrev, shownCurr, alpha, dtMs);
     rig.update(shownCurr, entities.trex, dtMs);
     hudCtx.cameraMode = rig.mode;
+    hudCtx.cameraCustom = rig.custom;
     hudCtx.configOpen = configOpen;
     hudCtx.starOpen = starOpen;
     hudCtx.dark = dark;
@@ -543,6 +549,8 @@ function main(): void {
 
   function frame(now: number): void {
     requestAnimationFrame(frame);
+    // On menus a first finger waits a moment for a second (a two-finger orbit); in a run, taps are instant.
+    input.setGestureWindow(curr.phase === 'playing' ? 0 : TOUCH_GESTURE_MS);
     const dt = Math.min(MAX_FRAME_MS, Math.max(0, now - last));
     last = now;
     if (dt > 0) fps += (1000 / dt - fps) * FPS_SMOOTHING;
@@ -579,6 +587,9 @@ function main(): void {
     present(1, SIM.STEP_MS);
     return curr;
   }
+
+  // Middle-drag, Ctrl/Cmd + Shift + drag or two fingers orbit the camera, like Blender.
+  input.onOrbit((dx, dy) => rig.orbit(-dx * ORBIT_PER_PX, dy * ORBIT_PER_PX));
 
   input.onAction(onAction);
   hud.onAction(onAction);

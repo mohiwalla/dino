@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { RUNNER } from '../config';
-import type { CameraMode, CameraRig, GameEvent, GameSnapshot } from '../types';
+import { CAMERA_MODES, type CameraMode, type CameraRig, type GameEvent, type GameSnapshot } from '../types';
 import {
   computeBasis,
   dir,
@@ -62,6 +62,9 @@ const PARTY_FOV = 34;
 const PARTY_IN_MS = 1200;
 /** Orbit speed: one full turn in about 24 s. */
 const PARTY_TURN_PER_MS = (Math.PI * 2) / 24000;
+/** Middle-drag orbit (CameraRig.orbit): how far the camera may tip, as pitch in radians. */
+const ORBIT_PITCH_MIN = -0.1;
+const ORBIT_PITCH_MAX = 1.35;
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -109,6 +112,14 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
   /** ms since a funny crash, or -1; faceBlend eases 0 -> 1 toward the face close-up. */
   let faceMs = -1;
   let faceBlend = 0;
+  /**
+   * The player's own orbit (a camera drag), added to every framing. Dragging from a preset makes
+   * a custom view (that preset turned by the drag), which the camera cycle keeps as a third stop.
+   */
+  let orbitYaw = 0;
+  let orbitPitch = 0;
+  let customView: { mode: CameraMode; yaw: number; pitch: number } | null = null;
+  let customOn = false;
   /** ms since celebrate(), or -1; partyBlend eases 0 -> 1 into the orbit. */
   let partyMs = -1;
   let partyBlend = 0;
@@ -141,6 +152,8 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       party[YAW] = partyYaw + partyMs * PARTY_TURN_PER_MS;
       mixFraming(desired, desired, party, partyBlend);
     }
+    desired[YAW] += orbitYaw;
+    desired[PITCH] = THREE.MathUtils.clamp(desired[PITCH] + orbitPitch, ORBIT_PITCH_MIN, ORBIT_PITCH_MAX);
   }
 
   function advanceParty(curr: GameSnapshot, dtMs: number): void {
@@ -227,8 +240,41 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       return mode;
     },
 
+    get custom() {
+      return customOn;
+    },
+
     setMode(next) {
       mode = next;
+      customOn = false;
+      orbitYaw = orbitPitch = 0;
+    },
+
+    cycle() {
+      const i = CAMERA_MODES.indexOf(mode);
+      if (customOn) this.setMode(CAMERA_MODES[0]);
+      else if (i === CAMERA_MODES.length - 1 && customView) {
+        customOn = true;
+        mode = customView.mode;
+        orbitYaw = customView.yaw;
+        orbitPitch = customView.pitch;
+      } else this.setMode(CAMERA_MODES[(i + 1) % CAMERA_MODES.length]);
+    },
+
+    orbit(dYaw, dPitch) {
+      // From a preset, a fresh custom view starts on it.
+      if (!customOn) {
+        customView = { mode, yaw: 0, pitch: 0 };
+        customOn = true;
+        orbitYaw = orbitPitch = 0;
+      }
+      orbitYaw += dYaw;
+      // The tilt is clamped where it lands (computeDesired); this only stops the offset running away.
+      orbitPitch = THREE.MathUtils.clamp(orbitPitch + dPitch, -Math.PI / 2, Math.PI / 2);
+      customView = { mode, yaw: orbitYaw, pitch: orbitPitch };
+      // Moved straight away (not eased in), so the view follows the mouse.
+      current[YAW] += dYaw;
+      current[PITCH] = THREE.MathUtils.clamp(current[PITCH] + dPitch, ORBIT_PITCH_MIN, ORBIT_PITCH_MAX);
     },
 
     setFunny(on) {

@@ -125,10 +125,10 @@ function dance(t: number): { lift: number; sway: number; twirl: number } {
 
 /**
  * The #1 player's crown, after a classic royal crown: a thick base rim, a band, then a wall
- * flaring out into alternating tall and short points with curved dips between them, each tipped
- * with a ball on a collar. Smooth (not voxels), so it reads as a prize rather than part of the
- * dino. The band and wall have real thickness, and the gold is a polished metal reflecting a small
- * built-in studio environment, so it shines as it turns. It hovers just over the head and rides
+ * flaring out into alternating tall and short points, each tipped with a ball. Low-poly and
+ * flat-faceted, to sit with the voxel world without being made of voxels itself. The band and wall
+ * have real thickness, and the gold is a polished metal reflecting a small built-in studio
+ * environment, so it shines as it turns. It hovers just over the head and rides
  * the head's pose (tipping over with it in a crash). Sizes in px.
  */
 const CROWN_GOLD = '#ffc24d';
@@ -137,7 +137,11 @@ const CROWN_RADIUS = 7;
 const CROWN_THICK = 0.85;
 const CROWN_BAND = 2.6;
 /** Points around the crown (tall and short alternate), and their heights above the band. */
-const CROWN_POINTS = 10;
+const CROWN_POINTS = 6;
+/** Facets per point along the rim: few, so it reads low-poly like the voxel world, not a detailed model. */
+const CROWN_FACETS = 4;
+/** Segments round the band and base rim, matching the wall's facets so they meet edge to edge. */
+const CROWN_SEGMENTS = CROWN_POINTS * CROWN_FACETS;
 const CROWN_TALL = 6.4;
 const CROWN_SHORT = 4;
 const CROWN_DIP = 1.5;
@@ -145,7 +149,7 @@ const CROWN_DIP = 1.5;
 const CROWN_FLARE = 0.14;
 /** The crown's widest span and full height to the top of its tallest ball (px), for sizing it on screen. */
 export const CROWN_WIDTH = 2 * CROWN_RADIUS * (1 + CROWN_FLARE);
-export const CROWN_HEIGHT = CROWN_BAND + CROWN_TALL + 1.9;
+export const CROWN_HEIGHT = CROWN_BAND + CROWN_TALL + 2.2;
 /** Gap between the top of the head and the crown's base, the bob around it, and its speeds. */
 const CROWN_LIFT = 2.7;
 const CROWN_BOB = 0.45;
@@ -189,7 +193,7 @@ function crownEdge(angle: number): number {
  * top edge closing them, so it has body rather than looking like foil. Returns the tips too.
  */
 function crownWall(): { faces: THREE.BufferGeometry; edge: THREE.BufferGeometry; tips: THREE.Vector3[] } {
-  const SAMPLES = CROWN_POINTS * 24;
+  const SAMPLES = CROWN_SEGMENTS;
   const faces: number[] = [];
   const edge: number[] = [];
   const tips: THREE.Vector3[] = [];
@@ -202,7 +206,7 @@ function crownWall(): { faces: THREE.BufferGeometry; edge: THREE.BufferGeometry;
     // Outer bottom, outer top, inner bottom, inner top.
     faces.push(...at(angle, CROWN_RADIUS, CROWN_BAND), ...at(angle, outer, CROWN_BAND + h), ...at(angle, CROWN_RADIUS - CROWN_THICK, CROWN_BAND), ...at(angle, inner, CROWN_BAND + h));
     edge.push(...at(angle, outer, CROWN_BAND + h), ...at(angle, inner, CROWN_BAND + h));
-    if (k % 24 === 0 && k < SAMPLES) tips.push(new THREE.Vector3(...at(angle, outer - CROWN_THICK / 2, CROWN_BAND + h)));
+    if (k % CROWN_FACETS === 0 && k < SAMPLES) tips.push(new THREE.Vector3(...at(angle, outer - CROWN_THICK / 2, CROWN_BAND + h)));
   }
   const faceIndex: number[] = [];
   const edgeIndex: number[] = [];
@@ -312,8 +316,8 @@ function createCrown(): THREE.Group {
   const crown = new THREE.Group();
   crown.name = 'crown';
   const studio = crownStudio();
-  const gold = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.08, envMap: studio, envMapIntensity: 2.6 });
-  const inside = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.45, envMap: studio, envMapIntensity: 0.45 });
+  const gold = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.08, envMap: studio, envMapIntensity: 2.6, flatShading: true });
+  const inside = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.45, envMap: studio, envMapIntensity: 0.45, flatShading: true });
   const add = (geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0): void => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
@@ -321,19 +325,17 @@ function createCrown(): THREE.Group {
     mesh.receiveShadow = true;
     crown.add(mesh);
   };
-  const ring = (radius: number, tube: number, y: number): void => add(new THREE.TorusGeometry(radius, tube, 16, 64).rotateX(Math.PI / 2), gold, 0, y);
-  // The band: a thick tube (outside bright, inside dimmer), a fat rim at the base and a rim on top.
-  add(new THREE.CylinderGeometry(CROWN_RADIUS, CROWN_RADIUS, CROWN_BAND, 64, 1, true).translate(0, CROWN_BAND / 2, 0), gold);
-  add(new THREE.CylinderGeometry(CROWN_RADIUS - CROWN_THICK, CROWN_RADIUS - CROWN_THICK, CROWN_BAND, 64, 1, true).translate(0, CROWN_BAND / 2, 0), inside);
+  const ring = (radius: number, tube: number, y: number): void => add(new THREE.TorusGeometry(radius, tube, 5, CROWN_SEGMENTS).rotateX(Math.PI / 2), gold, 0, y);
+  // The band: a thick tube (outside bright, inside dimmer) on a fat rim.
+  add(new THREE.CylinderGeometry(CROWN_RADIUS, CROWN_RADIUS, CROWN_BAND, CROWN_SEGMENTS, 1, true).translate(0, CROWN_BAND / 2, 0), gold);
+  add(new THREE.CylinderGeometry(CROWN_RADIUS - CROWN_THICK, CROWN_RADIUS - CROWN_THICK, CROWN_BAND, CROWN_SEGMENTS, 1, true).translate(0, CROWN_BAND / 2, 0), inside);
   ring(CROWN_RADIUS - CROWN_THICK / 2, 1.05, 0.2);
-  ring(CROWN_RADIUS - CROWN_THICK / 2, 0.6, CROWN_BAND);
   const wall = crownWall();
   add(wall.faces, gold);
   add(wall.edge, gold);
   wall.tips.forEach((tip, i) => {
-    const r = i % 2 === 0 ? 0.95 : 0.75;
-    add(new THREE.TorusGeometry(r * 0.75, r * 0.28, 8, 20).rotateX(Math.PI / 2), gold, tip.x, tip.y + 0.15, tip.z);
-    add(new THREE.SphereGeometry(r, 20, 14), gold, tip.x, tip.y + r * 0.95, tip.z);
+    const r = i % 2 === 0 ? 1.15 : 0.95;
+    add(new THREE.IcosahedronGeometry(r, 0), gold, tip.x, tip.y + r * 0.8, tip.z);
   });
   const glow = createGlow();
   crown.add(glow);

@@ -196,10 +196,13 @@ function boardName(name: string): string {
   return (words.length > 1 ? `${words[0]} ${words[words.length - 1][0]}` : plain).slice(0, BOARD_NAME_SLOTS);
 }
 
-/** What a row's bolt means, for its tooltip and screen readers: the multiplier, or the old fast start. */
+/** The old fast start (before the multiplier) is shown as 1.5x, about what it gave a typical run. */
+const FAST_START_AS = 1.5;
+
+/** What a row's bolt means, for its tooltip and screen readers: the multiplier it was played at. */
 function speedNote(entry: BoardEntry): string {
-  if (entry.multiplier !== 1) return `${entry.multiplier}x speed`;
-  return entry.fast ? 'started fast' : '';
+  const multiplier = entry.multiplier !== 1 ? entry.multiplier : entry.fast ? FAST_START_AS : 1;
+  return multiplier === 1 ? '' : `${multiplier}x speed`;
 }
 
 function boardRow(entry: BoardEntry, tone: number): PixelMask {
@@ -299,7 +302,7 @@ export function createHud(root: HTMLElement): Hud {
   const liveLine = add(scoreBox, layoutText(''), 'hud-live', 'small', isRunning);
 
   // ── Leaderboard (title and game over) ──
-  const isMenu = (v: ViewState): boolean => v.phase === 'title' || v.phase === 'crashed';
+  const isMenu = (v: ViewState): boolean => v.phase === 'title' || v.phase === 'crashed' || v.phase === 'paused';
   const boardBox = el('div', 'hud-board', hud);
   add(boardBox, layoutText('TEAM BOARD'), 'hud-board-title', 'small', isMenu);
   const boardRows = el('div', 'hud-board-rows', boardBox);
@@ -450,7 +453,7 @@ export function createHud(root: HTMLElement): Hud {
   let colorKey = -1;
   let lastPhase: GamePhase | null = null;
   let lastTouch: boolean | null = null;
-  let lastMode: CameraMode | null = null;
+  let lastMode: CameraMode | 'custom' | null = null;
   let lastMuted: boolean | null = null;
   let lastDark: boolean | null = null;
   let lastFps = -1;
@@ -560,16 +563,18 @@ export function createHud(root: HTMLElement): Hud {
       restartHint.setMask(ctx.touch ? restartTouch : restartDesktop);
       resumeHint.setMask(ctx.touch ? resumeTouch : resumeDesktop);
     }
-    if (ctx.cameraMode !== lastMode) {
+    // An orbited view reads CUSTOM until the next switch.
+    const shownMode = ctx.cameraCustom ? 'custom' : ctx.cameraMode;
+    if (shownMode !== lastMode) {
       // Narrow screens hide the mode name; show it briefly after a switch.
       if (lastMode !== null) {
         hud.dataset.labelPeek = 'true';
         clearTimeout(peekTimer);
         peekTimer = window.setTimeout(() => delete hud.dataset.labelPeek, 1500);
       }
-      lastMode = ctx.cameraMode;
-      cameraLabel.setMask(layoutText(CAMERA_LABELS[ctx.cameraMode]));
-      cameraBtn.setAttribute('aria-label', `Camera: ${ctx.cameraMode}. Switch camera`);
+      lastMode = shownMode;
+      cameraLabel.setMask(layoutText(ctx.cameraCustom ? 'CUSTOM' : CAMERA_LABELS[ctx.cameraMode]));
+      cameraBtn.setAttribute('aria-label', `Camera: ${shownMode}. Switch camera`);
     }
     const muted = ctx.settings.muted;
     if (muted !== lastMuted) {
@@ -700,6 +705,23 @@ export function createHud(root: HTMLElement): Hud {
     );
   }
 
+  /** Paused, the pause wash gets a hole over the crown resting by the board (see .hud-paused). */
+  let holed = false;
+  function placeCrownHole(isPaused: boolean): void {
+    const row = rowCanvases[0]?.el;
+    const rect = isPaused && row && !row.hidden ? row.getBoundingClientRect() : null;
+    if (!rect || rect.height === 0) {
+      if (holed) for (const v of ['--crown-x', '--crown-y', '--crown-r']) paused.style.removeProperty(v);
+      holed = false;
+      return;
+    }
+    const spot = crownAnchor.el.getBoundingClientRect();
+    paused.style.setProperty('--crown-x', `${spot.right - rect.height * 0.85}px`);
+    paused.style.setProperty('--crown-y', `${rect.top + rect.height / 2}px`);
+    paused.style.setProperty('--crown-r', `${rect.height * 1.1}px`);
+    holed = true;
+  }
+
   return {
     setBoard,
 
@@ -739,6 +761,7 @@ export function createHud(root: HTMLElement): Hud {
       view.config = ctx.configOpen;
       view.star = ctx.starOpen;
       renderCanvases();
+      placeCrownHole(s.phase === 'paused');
     },
 
     handleEvents(events: GameEvent[]): void {

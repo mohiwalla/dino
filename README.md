@@ -13,6 +13,7 @@ soft shadows. Built with Vite, three.js and TypeScript.
 | Duck (speed-drop in the air) | Down, S | Swipe down and hold | D-pad down, left stick down |
 | Restart after game over | Space, Enter | Tap | A, Start |
 | Switch camera | C | Camera button | – |
+| Orbit the camera (until the next switch) | Middle-drag, or Ctrl/Cmd + Shift + drag | Two-finger drag | – |
 | Mute | M | Speaker button | – |
 | Dark mode | D | Moon / sun button | – |
 | Pause / resume | P, Escape | Pause button | – |
@@ -96,7 +97,7 @@ The browser never sends a score. A ranked run works like this:
 
 The server also checks the run against its own clock and against the autopilot:
 
-- Real time is measured at the run's speed multiplier (0.5x to 3x, chosen in settings and tagged
+- Real time is measured at the run's speed multiplier (1x to 2x, chosen in settings and tagged
   on the board): at 2x the server expects 120 steps a second.
 - A run that plays steps faster than that is rejected.
 - These runs go to an admin for review, and stay off the board until approved:

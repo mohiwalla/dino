@@ -73,8 +73,13 @@
   gap: calc(var(--hud-s) * 4);
 }
 
-.hud[data-account='signedIn']:not([data-show-board='false']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
+.hud[data-account='signedIn']:not([data-show-board='false']):is([data-phase='title'], [data-phase='crashed'], [data-phase='paused']) .hud-board {
   display: flex;
+}
+
+/* Paused, the board sits above the pause screen's wash rather than dimmed under it. */
+.hud[data-phase='paused'] .hud-board {
+  z-index: 1;
 }
 
 /* As a run starts with the crown flying back to the board, the board stays a moment to catch it, then fades. */
@@ -296,6 +301,10 @@
   justify-content: center;
   gap: calc(var(--hud-u) * 5);
   background: var(--hud-wash);
+  /* A soft hole where the crown rests by the board, so the wash doesn't dull it (hud.ts sets these). */
+  --hole: radial-gradient(circle at var(--crown-x, -999px) var(--crown-y, -999px), transparent var(--crown-r, 0px), #000 calc(var(--crown-r, 0px) * 1.6));
+  -webkit-mask-image: var(--hole);
+  mask-image: var(--hole);
 }
 
 .hud-paused .hud-hint {
@@ -768,4 +777,15 @@
 .hud-board-row[title] {
   pointer-events: auto;
   cursor: help;
+}
+
+/* Camera orbit: an open hand while Ctrl/Cmd + Shift is held, a closed one while dragging (input.ts). */
+:root[data-orbit='ready'],
+:root[data-orbit='ready'] * {
+  cursor: grab !important;
+}
+
+:root[data-orbit='dragging'],
+:root[data-orbit='dragging'] * {
+  cursor: grabbing !important;
 }

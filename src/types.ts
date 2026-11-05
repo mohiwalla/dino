@@ -194,6 +194,13 @@ export interface InputController {
   sample(): InputFrame;
   /** Subscribe to UiActions (keys C / M / D / P / Escape / backquote). Returns an unsubscribe fn. */
   onAction(cb: (action: UiAction) => void): () => void;
+  /** Subscribe to camera-orbit drags (middle-drag, Ctrl/Cmd + Shift + drag, two fingers), in CSS px moved. */
+  onOrbit(cb: (dx: number, dy: number) => void): () => void;
+  /**
+   * How long a first finger waits to see if a second follows (a two-finger orbit rather than a
+   * tap). 0 means taps count at once: main.ts sets it on menus only, so taps in a run stay instant.
+   */
+  setGestureWindow(ms: number): void;
   /** True if the most recent input came from a touch screen (hints switch from "Space" to "Tap"). */
   readonly touch: boolean;
   dispose(): void;
@@ -307,12 +314,18 @@ export const CAMERA_MODES: readonly CameraMode[] = ['cinematic', 'side'];
 export interface CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   readonly mode: CameraMode;
-  /** Smoothly transitions to the new mode. */
+  /** The view is the player's custom one (a preset turned by a camera drag). */
+  readonly custom: boolean;
+  /** Smoothly transitions to the new mode (a preset; leaves the custom view). */
   setMode(mode: CameraMode): void;
+  /** The camera button / C: cinematic, side, then the custom view if the player has made one. */
+  cycle(): void;
   /** Funny mode: after a crash the camera closes in on the T-Rex's face. */
   setFunny(on: boolean): void;
   /** A rank up or a new best: the camera closes in and slowly circles the dancing T-Rex until restart. */
   celebrate(): void;
+  /** Turn the view around its target by these angles (radians), like a middle-drag in Blender; kept until the mode changes. */
+  orbit(dYaw: number, dPitch: number): void;
   resize(width: number, height: number): void;
   update(curr: GameSnapshot, trex: THREE.Object3D, dtMs: number): void;
   handleEvents(events: GameEvent[]): void;
@@ -324,6 +337,8 @@ export interface CameraRig {
 
 export interface HudContext {
   cameraMode: CameraMode;
+  /** The view was orbited away from the mode's angle: the camera button says CUSTOM. */
+  cameraCustom: boolean;
   settings: Readonly<Settings>;
   /** The config panel is open. */
   configOpen: boolean;

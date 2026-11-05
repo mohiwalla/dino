@@ -81,6 +81,54 @@ export function createInput(): InputController {
 
   const emit = (action: UiAction): void => listeners.forEach((cb) => cb(action));
 
+  // Drags that turn the camera instead of playing: a middle-drag, Ctrl/Cmd + Shift + drag (for
+  // trackpads), or two fingers on a touch screen.
+  const orbitListeners = new Set<(dx: number, dy: number) => void>();
+  const emitOrbit = (dx: number, dy: number): void => orbitListeners.forEach((cb) => cb(dx, dy));
+  let mouseOrbit: { id: number; x: number; y: number } | null = null;
+  /** Fingers down, for the two-finger orbit, and the midpoint it last moved from. */
+  const touches = new Map<number, { x: number; y: number }>();
+  let twoFinger: { x: number; y: number } | null = null;
+  /** On menus a first finger waits this long to see if a second follows (a two-finger orbit, not a tap). */
+  let gestureWindowMs = 0;
+  let pendingTouch: { id: number; y: number; timer: number } | null = null;
+
+  function midpoint(): { x: number; y: number } {
+    let x = 0;
+    let y = 0;
+    touches.forEach((t) => {
+      x += t.x / touches.size;
+      y += t.y / touches.size;
+    });
+    return { x, y };
+  }
+
+  /** A press that plays: jump (or start / restart), held while the pointer stays down. */
+  function press(id: number, y: number, isTouch: boolean): void {
+    pointers.set(id, { hold: 'jump', startY: y, touch: isTouch });
+    countPointers();
+    jumpLatch = true;
+    restartLatch = true;
+  }
+
+  /** The cursor hints a camera drag: an open hand while Ctrl/Cmd + Shift is held, closed while dragging. */
+  function setOrbitCursor(held: boolean): void {
+    const state = mouseOrbit ? 'dragging' : held ? 'ready' : '';
+    const root = document.documentElement;
+    if (state) root.dataset.orbit = state;
+    else delete root.dataset.orbit;
+  }
+  let orbitKeysHeld = false;
+  function onModifiers(e: KeyboardEvent): void {
+    orbitKeysHeld = (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey;
+    setOrbitCursor(orbitKeysHeld);
+  }
+
+  function cancelPendingTouch(): void {
+    if (pendingTouch) clearTimeout(pendingTouch.timer);
+    pendingTouch = null;
+  }
+
   function countPointers(): void {
     jumpPointers = 0;
     duckPointers = 0;
@@ -94,11 +142,18 @@ export function createInput(): InputController {
     jumpKeys.clear();
     duckKeys.clear();
     pointers.clear();
+    touches.clear();
+    twoFinger = null;
+    mouseOrbit = null;
+    orbitKeysHeld = false;
+    setOrbitCursor(false);
+    cancelPendingTouch();
     countPointers();
     duckLatch = false;
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    onModifiers(e);
     // Ctrl/Cmd + Shift + , opens and closes the settings, from anywhere (inside the panel too).
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'Comma') {
       e.preventDefault();
@@ -132,6 +187,7 @@ export function createInput(): InputController {
   }
 
   function onKeyUp(e: KeyboardEvent): void {
+    onModifiers(e);
     if (JUMP_CODES.has(e.code) || DUCK_CODES.has(e.code)) {
       jumpKeys.delete(e.code);
       duckKeys.delete(e.code);
@@ -141,15 +197,57 @@ export function createInput(): InputController {
 
   function onPointerDown(e: PointerEvent): void {
     if (inUi(e.target)) return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.pointerType === 'mouse') {
+      if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+        mouseOrbit = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        setOrbitCursor(true);
+        e.preventDefault();
+        return;
+      }
+      if (e.button !== 0) return;
+    }
     touch = e.pointerType !== 'mouse';
-    pointers.set(e.pointerId, { hold: 'jump', startY: e.clientY, touch });
-    countPointers();
-    jumpLatch = true;
-    restartLatch = true;
+    if (!touch) return press(e.pointerId, e.clientY, false);
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size >= 2) {
+      // Two fingers: an orbit. The first finger's tap is called off, and nothing holds jump.
+      cancelPendingTouch();
+      touches.forEach((_, id) => pointers.delete(id));
+      countPointers();
+      twoFinger = midpoint();
+      return;
+    }
+    if (gestureWindowMs <= 0) return press(e.pointerId, e.clientY, true);
+    const id = e.pointerId;
+    const y = e.clientY;
+    pendingTouch = {
+      id,
+      y,
+      timer: window.setTimeout(() => {
+        pendingTouch = null;
+        press(id, y, true);
+      }, gestureWindowMs),
+    };
   }
 
   function onPointerMove(e: PointerEvent): void {
+    if (mouseOrbit && e.pointerId === mouseOrbit.id) {
+      emitOrbit(e.clientX - mouseOrbit.x, e.clientY - mouseOrbit.y);
+      mouseOrbit.x = e.clientX;
+      mouseOrbit.y = e.clientY;
+      return;
+    }
+    const finger = touches.get(e.pointerId);
+    if (finger) {
+      finger.x = e.clientX;
+      finger.y = e.clientY;
+      if (twoFinger) {
+        const m = midpoint();
+        emitOrbit(m.x - twoFinger.x, m.y - twoFinger.y);
+        twoFinger = m;
+        return;
+      }
+    }
     const p = pointers.get(e.pointerId);
     if (!p || !p.touch || p.hold === 'duck') return;
     if (e.clientY - p.startY > SWIPE_DUCK_PX) {
@@ -160,12 +258,29 @@ export function createInput(): InputController {
   }
 
   function onPointerUp(e: PointerEvent): void {
+    if (mouseOrbit?.id === e.pointerId) {
+      mouseOrbit = null;
+      setOrbitCursor(orbitKeysHeld);
+    }
+    touches.delete(e.pointerId);
+    if (twoFinger && touches.size < 2) twoFinger = null;
+    // A quick tap that let go inside the gesture window still counts (as a tap, not a hold).
+    if (pendingTouch?.id === e.pointerId) {
+      cancelPendingTouch();
+      jumpLatch = true;
+      restartLatch = true;
+    }
     if (pointers.delete(e.pointerId)) countPointers();
   }
 
+  // A middle click would start the browser's autoscroll; Ctrl + Shift + click its context menu (macOS).
+  function onMouseDown(e: MouseEvent): void {
+    if (e.button === 1 && !inUi(e.target)) e.preventDefault();
+  }
+
   // Android fires contextmenu (and then pointercancel) on a long press, which would cut a held jump.
-  function onContextMenu(e: Event): void {
-    if (touch && !inUi(e.target)) e.preventDefault();
+  function onContextMenu(e: MouseEvent): void {
+    if ((touch || mouseOrbit || (e.ctrlKey && e.shiftKey)) && !inUi(e.target)) e.preventDefault();
   }
 
   function onVisibility(): void {
@@ -210,6 +325,7 @@ export function createInput(): InputController {
   window.addEventListener('pointermove', onPointerMove, opts);
   window.addEventListener('pointerup', onPointerUp, opts);
   window.addEventListener('pointercancel', onPointerUp, opts);
+  window.addEventListener('mousedown', onMouseDown, opts);
   window.addEventListener('contextmenu', onContextMenu, opts);
   window.addEventListener('blur', releaseAll);
   document.addEventListener('visibilitychange', onVisibility);
@@ -234,6 +350,15 @@ export function createInput(): InputController {
       return () => listeners.delete(cb);
     },
 
+    onOrbit(cb: (dx: number, dy: number) => void): () => void {
+      orbitListeners.add(cb);
+      return () => orbitListeners.delete(cb);
+    },
+
+    setGestureWindow(ms: number): void {
+      gestureWindowMs = ms;
+    },
+
     get touch(): boolean {
       return touch;
     },
@@ -245,12 +370,14 @@ export function createInput(): InputController {
       window.removeEventListener('pointermove', onPointerMove, opts);
       window.removeEventListener('pointerup', onPointerUp, opts);
       window.removeEventListener('pointercancel', onPointerUp, opts);
+      window.removeEventListener('mousedown', onMouseDown, opts);
       window.removeEventListener('contextmenu', onContextMenu, opts);
       window.removeEventListener('blur', releaseAll);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('gamepadconnected', onGamepadConnected);
       window.removeEventListener('gamepaddisconnected', onGamepadDisconnected);
       listeners.clear();
+      orbitListeners.clear();
       releaseAll();
     },
   };
