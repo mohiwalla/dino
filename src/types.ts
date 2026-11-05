@@ -456,6 +456,8 @@ export interface BoardView {
   newBest: { from: number | null; to: number } | null;
   /** The player just deleted their stats, so their row leaves the board. Cleared after one view. */
   statsDeleted: object | null;
+  /** The ranked run just finished and saved, which the game-over screen offers to watch back; null once the next run starts. */
+  lastRun: string | null;
 }
 
 export interface Hud {

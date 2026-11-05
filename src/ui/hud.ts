@@ -476,6 +476,14 @@ export function createHud(root: HTMLElement): Hud {
   const againDesktop = layoutText('PRESS SPACE TO WATCH AGAIN');
   const againTouch = layoutText('TAP TO WATCH AGAIN');
   const restartHint = add(over, restartDesktop, 'hud-hint', 'small', isCrashed);
+  // The ranked run just saved, to watch back (through the page curtain to its replay).
+  const watchLink = el('a', 'hud-chip hud-chip-with-icon hud-watch', over);
+  watchLink.hidden = true;
+  watchLink.setAttribute('data-ui', '');
+  watchLink.setAttribute('aria-label', 'Watch the replay of this run');
+  watchLink.addEventListener('mousedown', (e) => e.preventDefault());
+  add(watchLink, PLAY_ICON, 'hud-chip-icon', 'small', isCrashed, false);
+  add(watchLink, layoutText('WATCH REPLAY'), 'hud-chip-text', 'small', isCrashed, false);
 
   // ── Paused ──
   const isPaused = (v: ViewState): boolean => v.phase === 'paused';
@@ -706,6 +714,8 @@ export function createHud(root: HTMLElement): Hud {
     const key = JSON.stringify([view, period]);
     if (key === boardKey) return;
     boardKey = key;
+    watchLink.hidden = !view.lastRun;
+    if (view.lastRun) watchLink.href = `/?replay=${encodeURIComponent(view.lastRun)}`;
     const rows = shownRows(view);
     // Deleted stats: copy the player's row off the old board before it is redrawn.
     let decay: (() => void) | null = null;

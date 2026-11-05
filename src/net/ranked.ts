@@ -100,6 +100,7 @@ export function createRanked(opts: RankedOptions): Ranked {
   let live = '';
   let newBest: BoardView['newBest'] = null;
   let statsDeleted: BoardView['statsDeleted'] = null;
+  let lastRun: string | null = null;
   let lastRunRanked = false;
   /** The server said this tab's game is out of date (it was updated since the page loaded). */
   let outdated = false;
@@ -132,7 +133,7 @@ export function createRanked(opts: RankedOptions): Ranked {
     if (!shownNote && account?.banned) shownNote = 'BANNED FROM THE BOARD';
     else if (!shownNote && reachable && !account) shownNote = 'SIGN IN TO JOIN THE TEAM BOARD';
     else if (!shownNote && account && entries.length === 0) shownNote = 'NO RANKED RUNS YET';
-    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, week, lastWeek, note: shownNote, live, newBest, statsDeleted });
+    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, week, lastWeek, note: shownNote, live, newBest, statsDeleted, lastRun });
   }
 
   async function refresh(): Promise<void> {
@@ -217,6 +218,8 @@ export function createRanked(opts: RankedOptions): Ranked {
         await sleep(1000 * (i + 1));
       }
     }
+    // Saved (whatever the verdict, its player can watch it): the game-over screen offers its replay.
+    if (result) lastRun = r.id;
     if (!result) note = 'COULD NOT SUBMIT RUN';
     else if (result.status === 'review') note = 'RUN SENT FOR REVIEW';
     else if (result.status === 'rejected') note = 'RUN FAILED THE CHECKS';
@@ -238,6 +241,7 @@ export function createRanked(opts: RankedOptions): Ranked {
     r.recorder.record(first);
     run = r;
     note = '';
+    lastRun = null;
     live = '';
     if (!account || account.banned || !opts.rankable()) {
       unranked(r);
