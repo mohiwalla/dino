@@ -95,6 +95,15 @@ const TREX_IDLE: readonly string[] = [
   '..........bbbb......ffff................',
 ];
 
+/** Happy: the idle T-Rex with a closed, smiling ^ eye, for celebrations. */
+const TREX_HAPPY: readonly string[] = TREX_IDLE.map((row, y) => {
+  // A caret over the eye: its tip at the top of the old eye, its feet two rows down.
+  const marks: Readonly<Record<number, readonly number[]>> = { 2: [24, 25], 3: [23, 26], 4: [22, 27] };
+  const cols = marks[y];
+  const plain = row.replace(/o/g, 'h');
+  return cols ? [...plain].map((c, x) => (cols.includes(x) ? 'o' : c)).join('') : plain;
+});
+
 /** Eye closed (idle blink). */
 const TREX_BLINK: readonly string[] = [
   '......................hhhhhhhhhhhhhhhh..',
@@ -691,6 +700,7 @@ export const TREX_SPRITES: Readonly<Record<TrexFrame, readonly string[]>> = {
   run2: TREX_RUN2,
   jump: TREX_IDLE,
   crashed: TREX_CRASHED,
+  happy: TREX_HAPPY,
   duck1: TREX_DUCK1,
   duck2: TREX_DUCK2,
 };

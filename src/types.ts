@@ -23,7 +23,8 @@ export interface Box {
 
 // ─── Simulation (src/sim) ────────────────────────────────────────────────────────────────
 
-export type TrexFrame = 'idle' | 'blink' | 'run1' | 'run2' | 'duck1' | 'duck2' | 'jump' | 'crashed';
+/** 'happy' (^ ^ eyes) is the renderer's own, for celebrating; the sim never uses it. */
+export type TrexFrame = 'idle' | 'blink' | 'run1' | 'run2' | 'duck1' | 'duck2' | 'jump' | 'crashed' | 'happy';
 
 export type TrexStatus = 'waiting' | 'running' | 'jumping' | 'ducking' | 'crashed';
 
@@ -158,10 +159,11 @@ export interface GameSimOptions {
 // ─── Input (src/input) ───────────────────────────────────────────────────────────────────
 
 /** Non-gameplay actions, routed by main.ts. */
-export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'toggleDebug' | 'toggleTheme' | 'toggleConfig' | 'signOut';
+/** escape is the Escape key: like togglePause, except it alone can call off a resume countdown. */
+export type UiAction = 'toggleCamera' | 'toggleMute' | 'togglePause' | 'escape' | 'toggleDebug' | 'toggleTheme' | 'toggleConfig' | 'signOut' | 'deleteStats' | 'starLater' | 'starDone';
 
-/** regular: Chrome's runner. funny: farts, flops and meme crash clips. nsfw: funny with the NSFW crash clips too. */
-export type GameMode = 'regular' | 'funny' | 'nsfw';
+/** regular: Chrome's runner. funny: meme crash clips (and the flop and game-over lines that go with them). */
+export type GameMode = 'regular' | 'funny';
 
 /** Everything the config panel edits. main.ts owns and persists it. */
 export interface Settings {
@@ -170,11 +172,17 @@ export interface Settings {
   muted: boolean;
   /** Submit runs to the team leaderboard while signed in. */
   ranked: boolean;
-  /** Runs begin halfway to top speed. Ranked as usual, tagged on the board. */
-  startFast: boolean;
+  /** Game speed multiplier (one of MULTIPLIERS), from the next run on. Ranked as usual, tagged on the board. */
+  multiplier: number;
   /** Show the team board on the title and game-over screens. */
   showBoard: boolean;
   mode: GameMode;
+  /** Jumps fart, with a cloud. A funny-mode option: it only counts in funny mode. */
+  farts: boolean;
+  /** Funny mode's crash clips come only from the NSFW set. */
+  nsfw: boolean;
+  /** Chrome's night every so often. Off, the chosen theme (D) stays put. */
+  dayNight: boolean;
 }
 
 export interface InputController {
@@ -197,8 +205,8 @@ export interface InputController {
 
 // ─── Audio (src/audio) ───────────────────────────────────────────────────────────────────
 
-/** fart and slide are funny mode's jump and crash (src/audio/funny.ts). */
-export type SfxName = 'jump' | 'milestone' | 'crash' | 'fart' | 'slide';
+/** fart is the farts setting's jump, slide funny mode's crash (src/audio/funny.ts). */
+export type SfxName = 'jump' | 'milestone' | 'crash' | 'victory' | 'fart' | 'slide';
 
 export interface Sfx {
   play(name: SfxName): void;
@@ -209,10 +217,12 @@ export interface Sfx {
   setVolume(volume: number): void;
   /** Resume the AudioContext; call from a user gesture. Safe to call repeatedly. */
   unlock(): void;
-  /** Fetch funny mode's recorded clips ahead of the first jump; `nsfw` picks the crash clip set. */
+  /** Fetch the recorded farts and crash clips ahead of the first jump; `nsfw` picks the crash clip set. */
   preloadFunny(nsfw: boolean): void;
   /** Cut funny mode's crash clip short (a new run started). */
   stopFunny(): void;
+  /** The hits (s) of the crash clip the last play('slide') started, for the crash to move to; empty otherwise. */
+  readonly crashBeats: readonly number[];
 }
 
 // Factory: src/audio/sfx.ts     export function createSfx(): Sfx  (persists mute and volume in localStorage)
@@ -250,6 +260,14 @@ export interface World {
 // Factory: src/render/world.ts  export function createWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer): World
 
 /** The T-Rex, the obstacle pool, and small effects (dust, landing puffs, crash). */
+/** Where the board's crown rests: a point in the scene, and the scale that makes it the right size on screen. */
+export interface CrownSpot {
+  point: THREE.Vector3;
+  scale: number;
+  /** The board's own opacity (it fades out after a run starts); the crown fades with it. */
+  opacity: number;
+}
+
 export interface Entities {
   /** The T-Rex's root object (its position is the interpolated sim position). The camera follows it. */
   readonly trex: THREE.Object3D;
@@ -257,8 +275,22 @@ export interface Entities {
   handleEvents(events: GameEvent[]): void;
   /** Draw sim collision boxes as wireframes. */
   setDebug(on: boolean): void;
-  /** Funny mode: fart clouds on jumps, a spin-and-flop crash. Cosmetic only. */
+  /** Funny mode: a different slapstick crash every time, twitching on the crash clip's hits. Cosmetic only. */
   setFunny(on: boolean): void;
+  /** The hits (s) of the crash clip that just started, for the crash about to be shown. */
+  setCrashBeats(beats: readonly number[]): void;
+  /** The player is #1 on the team board: the T-Rex wears a crown. */
+  setCrown(on: boolean): void;
+  /** Fly the crown from the head to its resting place by the board, or from there onto the head. */
+  flyCrown(direction: 'out' | 'in', board: () => CrownSpot | null): void;
+  /** The crown's resting place by the board's first place (asked every frame), or null while the board is away. */
+  setBoardCrown(spot: (() => CrownSpot | null) | null): void;
+  /** Place the crowns for this frame. Call after the camera has moved: the board's one sits just in front of it. */
+  placeCrowns(dtMs: number): void;
+  /** Fart clouds on jumps. Cosmetic only. */
+  setFarts(on: boolean): void;
+  /** A rank up or a new best: the T-Rex gets up and hops for joy until the next run. */
+  celebrate(): void;
   dispose(): void;
 }
 
@@ -267,11 +299,10 @@ export interface Entities {
 /**
  * cinematic – default: three-quarter view from the side and slightly behind and above.
  * side      – the classic 2D Chrome framing: square-on side view, low FOV, far away.
- * chase     – over-the-shoulder behind the T-Rex looking down the track (+X).
  */
-export type CameraMode = 'cinematic' | 'side' | 'chase';
+export type CameraMode = 'cinematic' | 'side';
 
-export const CAMERA_MODES: readonly CameraMode[] = ['cinematic', 'side', 'chase'];
+export const CAMERA_MODES: readonly CameraMode[] = ['cinematic', 'side'];
 
 export interface CameraRig {
   readonly camera: THREE.PerspectiveCamera;
@@ -280,6 +311,8 @@ export interface CameraRig {
   setMode(mode: CameraMode): void;
   /** Funny mode: after a crash the camera closes in on the T-Rex's face. */
   setFunny(on: boolean): void;
+  /** A rank up or a new best: the camera closes in and slowly circles the dancing T-Rex until restart. */
+  celebrate(): void;
   resize(width: number, height: number): void;
   update(curr: GameSnapshot, trex: THREE.Object3D, dtMs: number): void;
   handleEvents(events: GameEvent[]): void;
@@ -294,11 +327,15 @@ export interface HudContext {
   settings: Readonly<Settings>;
   /** The config panel is open. */
   configOpen: boolean;
+  /** The prompt to star the repo on GitHub is open. */
+  starOpen: boolean;
   /** Dark theme on. The snapshot's `night` is already remapped for it; this only drives the toggle button. */
   dark: boolean;
   touch: boolean;
   /** Frames per second to show in the corner, or null to hide the counter. */
   fps: number | null;
+  /** Paused and counting down to resume: the number to show (3, 2, 1), else null. */
+  resumeIn: number | null;
 }
 
 /** One leaderboard row: a player's best verified run. */
@@ -307,8 +344,10 @@ export interface BoardEntry {
   name: string;
   score: number;
   mobile: boolean;
-  /** Started fast (Settings.startFast). */
+  /** Started fast (the old fast mode; runs from before the multiplier). */
   fast: boolean;
+  /** The game speed multiplier it was played at (Settings.multiplier). */
+  multiplier: number;
   /** The signed-in player's own row. */
   me: boolean;
 }
@@ -326,11 +365,21 @@ export interface BoardView {
   note: string;
   /** A line under the score while a run is going (RANKED, or why it is not). */
   live: string;
+  /** The player's last ranked run set a new best: their rank before (null: not on the board) and now. Cleared after one view. */
+  newBest: { from: number | null; to: number } | null;
+  /** The player just deleted their stats, so their row leaves the board. Cleared after one view. */
+  statsDeleted: object | null;
 }
 
 export interface Hud {
   update(s: GameSnapshot, ctx: HudContext): void;
   setBoard(view: BoardView): void;
+  /** Keep the board on screen for `ms` after a run starts (fading out at the end), for the crown to fly back into. */
+  lingerBoard(ms: number): void;
+  /** Where the crown rests by the board's first place on screen (CSS px: the right edge of its spot, the letters' baseline and height) and the board's opacity, or null while the board isn't shown. */
+  crownRest(): { right: number; baseline: number; height: number; opacity: number } | null;
+  /** Confetti over the game, for a rank up or a new best. */
+  celebrate(): void;
   handleEvents(events: GameEvent[]): void;
   /** HUD buttons (camera, mute, theme, pause, config) emit UiActions. */
   onAction(cb: (action: UiAction) => void): () => void;

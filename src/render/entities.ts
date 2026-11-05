@@ -24,7 +24,7 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
   const debug = createDebugBoxes();
   const smoke = createSmoke();
   scene.add(trex.root, obstacles.root, effects.mesh, smoke.points, debug.lines);
-  let funny = false;
+  let farts = false;
   let debugOn = false;
   let night = -1;
 
@@ -59,7 +59,7 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
     switch (e.type) {
       case 'jump':
         trex.jump();
-        if (funny) smoke.jump();
+        if (farts) smoke.jump();
         break;
       case 'land':
         trex.land();
@@ -104,8 +104,36 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
     },
 
     setFunny(on) {
-      funny = on;
       trex.setFunny(on);
+    },
+
+    setFarts(on) {
+      farts = on;
+    },
+
+    setCrown(on) {
+      trex.setCrown(on);
+    },
+
+    flyCrown(direction, board) {
+      trex.flyCrown(direction, board);
+    },
+
+    setBoardCrown(spot) {
+      trex.setBoardCrown(spot);
+    },
+
+    placeCrowns(dtMs) {
+      trex.placeCrowns(dtMs);
+    },
+
+    setCrashBeats(beats) {
+      trex.setCrashBeats(beats);
+    },
+
+    celebrate() {
+      trex.celebrate();
+      obstacles.bury();
     },
 
     dispose() {

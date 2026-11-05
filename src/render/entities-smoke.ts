@@ -1,4 +1,4 @@
-// Funny mode's fart gas: soft, round, camera-facing smoke puffs (not voxels) that leave a trail
+// The farts setting's gas: soft, round, camera-facing smoke puffs (not voxels) that leave a trail
 // along the jump arc. One THREE.Points draw call for the whole pool; each puff grows, drifts
 // up and back, and fades. The puff shape is a few octaves of cheap noise in the fragment
 // shader, rotated per puff, so no two look alike and no texture is needed.
@@ -8,7 +8,7 @@ import { SIM } from '../config';
 import type { GameSnapshot } from '../types';
 
 const CAPACITY = 160;
-/** Puffs per second from the T-Rex's rear while a funny jump is in the air. */
+/** Puffs per second from the T-Rex's rear while a farting jump is in the air. */
 const TRAIL_RATE = 55;
 /** The initial blast when the jump starts. */
 const BLAST_COUNT = 10;
@@ -63,7 +63,7 @@ const FRAGMENT = /* glsl */ `
 
 export interface Smoke {
   readonly points: THREE.Points;
-  /** A funny jump just started: blast, then trail while airborne. */
+  /** A farting jump just started: blast, then trail while airborne. */
   jump(): void;
   /** `trex` is the T-Rex root's interpolated position; `dtMs` is 0 while paused. */
   update(curr: GameSnapshot, trex: THREE.Vector3, dtMs: number): void;

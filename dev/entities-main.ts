@@ -1,5 +1,5 @@
 // Dev harness for src/render/entities.ts + src/render/camera.ts.
-// Query params: ?cam=cinematic|side|chase  ?debug=1  ?phase=title  ?scene=run|ptero|duck|crash|cacti
+// Query params: ?cam=cinematic|side  ?debug=1  ?phase=title  ?scene=run|ptero|duck|crash|cacti
 //               ?speed=6  ?night=0..1  ?sim=real (use src/sim if present)  ?warp=<steps>
 // Keys: Space/Up jump (starts), Down duck, C camera, D debug, P pause, Enter restart.
 

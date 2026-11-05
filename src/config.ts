@@ -11,12 +11,18 @@ export const SIM = {
 } as const;
 
 /** Chrome Runner.config, plus our 3D spawn window. */
+/**
+ * Game speed multipliers a player can pick (Settings.multiplier): the whole game runs this much
+ * faster or slower in real time. The sim is untouched, so a run replays the same at any speed.
+ */
+export const MULTIPLIERS: readonly number[] = [0.5, 1, 1.5, 2, 2.5, 3];
+
 export const RUNNER = {
   SPEED: 6,
   MAX_SPEED: 13,
   /** Added to the speed every frame until MAX_SPEED. */
   ACCELERATION: 0.001,
-  /** "Start fast" runs begin halfway to MAX_SPEED (where a normal run is about a minute in). */
+  /** Fast mode runs begin halfway to MAX_SPEED (where a normal run is about a minute in). */
   FAST_START_SPEED: 9.5,
   /** Chrome multiplies speed by this on mobile-width screens. We leave it off (see GameSimOptions.mobile). */
   MOBILE_SPEED_COEFFICIENT: 1.2,
@@ -222,6 +228,9 @@ export const SLOT = {
   EYE: 2,
 } as const;
 
+/** The game's source, linked from the corner of the HUD and the star prompt. */
+export const REPO_URL = 'https://github.com/mohiwalla/dino-3d';
+
 export const STORAGE_KEYS = {
   highScore: 'dino3d.highScore',
   muted: 'dino3d.muted',
@@ -233,8 +242,16 @@ export const STORAGE_KEYS = {
   /** "0" when the player hid the team board. */
   showBoard: 'dino3d.showBoard',
   mode: 'dino3d.mode',
-  /** "1" when runs start fast. */
-  startFast: 'dino3d.startFast',
+  /** "1" when jumps fart. */
+  farts: 'dino3d.farts',
+  /** "1" when funny mode plays the NSFW crash clips. */
+  nsfw: 'dino3d.nsfw',
+  /** "0" when the day/night cycle is off. */
+  dayNight: 'dino3d.dayNight',
+  /** The game speed multiplier, one of MULTIPLIERS. */
+  multiplier: 'dino3d.multiplier',
   /** The last leaderboard and account seen, shown at once on the next load. */
   board: 'dino3d.board',
+  /** The star prompt: "later" once put off, "done" once answered for good; unset until asked. */
+  starPrompt: 'dino3d.starPrompt',
 } as const;

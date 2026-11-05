@@ -31,9 +31,8 @@ const SWOOP_MS = 1500;
 /** SmoothDamp times (s): ~0.8 s to settle on a mode change, tighter while tracking the swoop curve. */
 const SMOOTH_TIME = 0.26;
 const SWOOP_SMOOTH_TIME = 0.1;
-/** Extra cinematic fov (degrees) and chase pitch drop (radians) at MAX_SPEED. */
+/** Extra cinematic fov (degrees) at MAX_SPEED. */
 const SPEED_FOV = 4;
-const SPEED_PITCH = -0.035;
 const SHAKE_MS = 420;
 /** Shake amplitude as a fraction of the view's half-height. */
 const SHAKE_AMOUNT = 0.022;
@@ -51,6 +50,18 @@ const FACE_SIZE = 66;
 const FACE_FOV = 30;
 const FACE_DELAY_MS = 250;
 const FACE_MS = 900;
+/**
+ * Celebration: the camera eases in on the dancing T-Rex (aimed above it, so it dances below
+ * the game-over text) and circles it slowly until the next run.
+ */
+const PARTY_X = 22;
+const PARTY_Y = 62;
+const PARTY_PITCH = 10;
+const PARTY_SIZE = 80;
+const PARTY_FOV = 34;
+const PARTY_IN_MS = 1200;
+/** Orbit speed: one full turn in about 24 s. */
+const PARTY_TURN_PER_MS = (Math.PI * 2) / 24000;
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -98,6 +109,12 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
   /** ms since a funny crash, or -1; faceBlend eases 0 -> 1 toward the face close-up. */
   let faceMs = -1;
   let faceBlend = 0;
+  /** ms since celebrate(), or -1; partyBlend eases 0 -> 1 into the orbit. */
+  let partyMs = -1;
+  let partyBlend = 0;
+  /** The yaw the orbit starts from: wherever the camera was looking. */
+  let partyYaw = 0;
+  const party = framing(PARTY_X, PARTY_Y, 0, PARTY_PITCH, PARTY_SIZE, PARTY_FOV);
   const face = {} as Record<CameraMode, Framing>;
   for (const m of Object.keys(TITLES) as CameraMode[]) {
     const t = TITLES[m].base;
@@ -119,8 +136,24 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
     const speedT = THREE.MathUtils.clamp((curr.speed - RUNNER.SPEED) / (RUNNER.MAX_SPEED - RUNNER.SPEED), 0, 1) * titleBlend;
     desired[TY] += (TITLE_FOLLOW + (MODES[mode].follow - TITLE_FOLLOW) * titleBlend) * Math.max(0, trexY);
     if (mode === 'cinematic') widenFov(desired, SPEED_FOV * speedT);
-    if (mode === 'chase') desired[PITCH] += SPEED_PITCH * speedT;
     if (faceBlend > 0) mixFraming(desired, desired, face[mode], faceBlend);
+    if (partyBlend > 0) {
+      party[YAW] = partyYaw + partyMs * PARTY_TURN_PER_MS;
+      mixFraming(desired, desired, party, partyBlend);
+    }
+  }
+
+  function advanceParty(curr: GameSnapshot, dtMs: number): void {
+    if (partyMs < 0) return;
+    if (curr.phase !== 'crashed') {
+      partyMs = -1;
+      partyBlend = 0;
+      // Unwind the orbit to the nearest equal angle, so the camera doesn't spin back through every turn.
+      current[YAW] = Math.atan2(Math.sin(current[YAW]), Math.cos(current[YAW]));
+      return;
+    }
+    partyMs += dtMs;
+    partyBlend = easeInOutCubic(Math.min(1, partyMs / PARTY_IN_MS));
   }
 
   function advanceFace(curr: GameSnapshot, dtMs: number): void {
@@ -202,6 +235,12 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       funny = on;
     },
 
+    celebrate() {
+      if (partyMs >= 0 || reducedMotion?.matches) return;
+      partyMs = 0;
+      partyYaw = current[YAW];
+    },
+
     resize(width, height) {
       aspect = Math.max(1e-3, width) / Math.max(1, height);
       camera.aspect = aspect;
@@ -213,6 +252,7 @@ export function createCameraRig(initialMode: CameraMode): CameraRig {
       const dt = Math.min(Math.max(dtMs, 0), MAX_DT_MS);
       advanceSwoop(curr, dt);
       advanceFace(curr, dt);
+      advanceParty(curr, dt);
       computeDesired(curr, trex.position.y);
       if (!initialized) {
         current.set(desired);

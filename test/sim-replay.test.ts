@@ -156,6 +156,14 @@ describe('verification', () => {
     expect(checkTiming([[0, 0], [100, 20_000]], 20_000).rejected).not.toEqual([]);
   });
 
+  test('a speed multiplier moves the clock the run is held to', () => {
+    expect(checkTiming(beatsFor(20_000, 2), 20_000, 2)).toEqual({ rejected: [], review: [] });
+    expect(checkTiming(beatsFor(20_000, 0.5), 20_000, 0.5)).toEqual({ rejected: [], review: [] });
+    // Played at 3x while claiming 2x: too fast. Played at 1x while claiming 2x: slow motion.
+    expect(checkTiming(beatsFor(20_000, 3), 20_000, 2).rejected).not.toEqual([]);
+    expect(checkTiming(beatsFor(20_000, 1), 20_000, 2).review).not.toEqual([]);
+  });
+
   test('slow motion is sent for review', () => {
     expect(checkTiming(beatsFor(20_000, 0.8), 20_000).review).not.toEqual([]);
     expect(checkTiming(beatsFor(20_000, 0.98), 20_000).review).toEqual([]);
@@ -195,7 +203,7 @@ describe('verification', () => {
     }
   });
 
-  test('jumping a little later than the autopilot does not look like it', () => {
+  test('a bot that jumps a step or two after the autopilot is flagged for its timing', () => {
     const random = mulberry32(8);
     let wait = -1;
     let holdLeft = 0;
@@ -217,6 +225,39 @@ describe('verification', () => {
     };
     const run = playRun(createGameSim(), PRESS, 99, false, lateJumper);
     expect(run.score).toBeGreaterThan(400); // enough jumps for the bot checks to judge
+    const verdict = verifyRun({ ...run.spec, steps: run.steps, inputs: run.inputs, beats: beatsFor(run.steps) });
+    expect(verdict.status).toBe('review');
+    if (verdict.status === 'review') expect(verdict.flags).toEqual([expect.stringContaining('jumps at the same distance')]);
+  });
+
+  test('a player who jumps a little early by eye, and holds as long as they like, is ok', () => {
+    const random = mulberry32(8);
+    const early = new Map<number, number>();
+    let holdLeft = 0;
+    const human: Player = (sim, step) => {
+      if (step > 3000) return NONE;
+      const s = sim.getSnapshot();
+      if (holdLeft > 0) {
+        holdLeft--;
+        return { ...NONE, jumpHeld: true };
+      }
+      const next = s.obstacles.filter((o) => o.x + o.width > s.trex.x).sort((a, b) => a.x - b.x)[0];
+      let jump = autopilot(s).jumpPressed;
+      if (next && next.kind !== 'pterodactyl' && s.trex.status === 'running') {
+        if (!early.has(next.id)) early.set(next.id, 10 + Math.floor(random() * 6));
+        jump ||= (next.x - s.trex.x - s.trex.width) / s.speed <= early.get(next.id)!;
+      }
+      if (jump && s.trex.status === 'running') {
+        holdLeft = 4 + Math.floor(random() * 9);
+        return PRESS;
+      }
+      // Ducks like the autopilot, but starts a mid-air drop a few steps late.
+      const ap = autopilot(s);
+      if (s.trex.status === 'jumping' && ap.duckHeld && !s.trex.speedDrop && random() < 0.67) return NONE;
+      return { ...ap, jumpPressed: false };
+    };
+    const run = playRun(createGameSim(), PRESS, 123, false, human);
+    expect(run.score).toBeGreaterThan(400);
     const verdict = verifyRun({ ...run.spec, steps: run.steps, inputs: run.inputs, beats: beatsFor(run.steps) });
     expect(verdict).toEqual({ status: 'ok', score: run.score });
   });

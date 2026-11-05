@@ -1,6 +1,6 @@
 // Decides whether a finished run counts. The score always comes from replaying the inputs;
 // on top of that, the server's own clock must agree with the step count, and the play must
-// not look like the built-in autopilot.
+// not look like the built-in autopilot or any other bot.
 
 import { SIM } from '../src/config';
 import { autopilot } from '../src/sim/autopilot';
@@ -12,6 +12,8 @@ import type { GameSim } from '../src/types';
 export type Beat = readonly [number, number];
 
 export interface RunRecord extends RunSpec {
+  /** The game speed multiplier it was played at: steps came that much faster in real time. */
+  multiplier?: number;
   steps: number;
   inputs: readonly number[];
   beats: readonly Beat[];
@@ -35,15 +37,33 @@ export const MAX_PAUSES = 3;
 export const MIN_JUMPS = 25;
 /** Share of jumps on the exact step the autopilot would have jumped that marks a bot. */
 export const AUTOPILOT_MATCH = 0.6;
-/** Jump holds (in steps) with less spread than this are machine-made. */
-export const MIN_HOLD_SPREAD = 0.5;
+
+/**
+ * Bots that read the game state play like clockwork. Each check is a share of the run that
+ * comes out the same: `limit` flags it alone, and two checks past `near` flag it together.
+ * Measured on the team's runs (Nov 2026): people reach at most 0.46 / 0.39 / 0.40, the
+ * scripted runs 0.62-0.85 on timing.
+ */
+interface Sameness {
+  label: (same: number, of: number) => string;
+  limit: number;
+  near: number;
+}
+
+/** Jumps within a step of the run's median time-to-obstacle. */
+export const SAME_TIMING: Sameness = { label: (n, of) => `${n} of ${of} jumps at the same distance`, limit: 0.55, near: 0.45 };
+/** Jump holds of the run's most common length. */
+export const SAME_HOLD: Sameness = { label: (n, of) => `${n} of ${of} jump holds the same length`, limit: 0.5, near: 0.4 };
+/** Mid-air ducks of the run's most common length. */
+export const SAME_DROP: Sameness = { label: (n, of) => `${n} of ${of} mid-air ducks the same length`, limit: 0.7, near: 0.5 };
 
 /**
  * Checks the beats the browser sent during the run against the steps it claimed at each.
  * Pauses show up as beats where no steps passed (the browser beats on pause and on resume);
- * the clock is only compared over stretches of play between them.
+ * the clock is only compared over stretches of play between them. At a speed `multiplier` each
+ * step takes that much less real time.
  */
-export function checkTiming(beats: readonly Beat[], steps: number): { rejected: string[]; review: string[] } {
+export function checkTiming(beats: readonly Beat[], steps: number, multiplier = 1): { rejected: string[]; review: string[] } {
   const rejected: string[] = [];
   const review: string[] = [];
   if (beats.length < 2 || beats[beats.length - 1][1] !== steps) {
@@ -68,7 +88,7 @@ export function checkTiming(beats: readonly Beat[], steps: number): { rejected: 
       continue;
     }
     inPause = false;
-    const played = (s - anchor[1]) * SIM.STEP_MS;
+    const played = ((s - anchor[1]) * SIM.STEP_MS) / multiplier;
     const elapsed = t - anchor[0];
     if (played > elapsed + FAST_SLACK_MS) {
       rejected.push(`played ${Math.round(played / 1000)}s in ${Math.round(elapsed / 1000)}s of real time`);
@@ -84,7 +104,7 @@ export function checkTiming(beats: readonly Beat[], steps: number): { rejected: 
 export function verifyRun(run: RunRecord): Verdict {
   const malformed = checkInputs(run.inputs, run.steps);
   if (malformed) return { status: 'rejected', flags: [malformed] };
-  const timing = checkTiming(run.beats, run.steps);
+  const timing = checkTiming(run.beats, run.steps, run.multiplier ?? 1);
   if (timing.rejected.length > 0) return { status: 'rejected', flags: timing.rejected };
 
   // The autopilot is stateless and keeps asking to jump until it does, so a jump only counts
@@ -95,6 +115,10 @@ export function verifyRun(run: RunRecord): Verdict {
   let autopilotJumps = 0;
   const holds: number[] = [];
   let hold = -1;
+  const drops: number[] = [];
+  let drop = -1;
+  /** Steps until the next obstacle reached the dino, at each jump. */
+  const timings: number[] = [];
   const asks = (sim: GameSim): boolean => {
     const s = sim.getSnapshot();
     return s.phase === 'playing' && s.trex.status === 'running' && autopilot(s).jumpPressed;
@@ -111,12 +135,22 @@ export function verifyRun(run: RunRecord): Verdict {
         hold = -1;
       }
     }
-    if (!input.jumpPressed || input.duckHeld) return;
     const s = sim.getSnapshot();
+    if (drop >= 0) {
+      if (input.duckHeld) drop++;
+      else {
+        drops.push(drop);
+        drop = -1;
+      }
+    } else if (input.duckHeld && s.phase === 'playing' && s.trex.status === 'jumping') drop = 1;
+    if (!input.jumpPressed || input.duckHeld) return;
     if (s.phase !== 'playing' || s.trex.status !== 'running' || s.obstacles.length === 0) return;
     jumps++;
     if (asked && !wasAsked) autopilotJumps++;
     hold = input.jumpHeld ? 1 : 0;
+    const front = s.trex.x + s.trex.width;
+    const next = Math.min(...s.obstacles.filter((o) => o.x + o.width > s.trex.x).map((o) => o.x));
+    if (Number.isFinite(next)) timings.push((next - front) / s.speed);
   });
   if (!result.ok) return { status: 'rejected', flags: [result.reason] };
 
@@ -124,7 +158,16 @@ export function verifyRun(run: RunRecord): Verdict {
   if (jumps >= MIN_JUMPS && autopilotJumps / jumps >= AUTOPILOT_MATCH) {
     flags.push(`${autopilotJumps} of ${jumps} jumps on the autopilot's exact step`);
   }
-  if (holds.length >= MIN_JUMPS && spread(holds) < MIN_HOLD_SPREAD) flags.push('jump holds are all the same length');
+  const median = timings.length > 0 ? [...timings].sort((a, b) => a - b)[timings.length >> 1] : 0;
+  const checks: [Sameness, number, number][] = [
+    [SAME_TIMING, timings.filter((t) => Math.abs(t - median) <= 1).length, timings.length],
+    [SAME_HOLD, mostCommon(holds), holds.length],
+    [SAME_DROP, mostCommon(drops), drops.length],
+  ];
+  const judged = checks.filter(([, , of]) => of >= MIN_JUMPS);
+  const past = (key: 'limit' | 'near') => judged.filter(([check, same, of]) => same / of >= check[key]);
+  const flagged = past('limit').length > 0 ? past('limit') : past('near').length >= 2 ? past('near') : [];
+  for (const [check, same, of] of flagged) flags.push(check.label(same, of));
   return flags.length > 0 ? { status: 'review', score: result.score, flags } : { status: 'ok', score: result.score };
 }
 
@@ -135,8 +178,9 @@ function pressSteps(inputs: readonly number[]): Set<number> {
   return steps;
 }
 
-/** Standard deviation. */
-function spread(values: readonly number[]): number {
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  return Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length);
+/** How many of the values equal the most common one. */
+function mostCommon(values: readonly number[]): number {
+  const counts = new Map<number, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return Math.max(0, ...counts.values());
 }

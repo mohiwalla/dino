@@ -194,9 +194,11 @@ export async function devLogin(url: URL, env: Env): Promise<Response> {
   return startSession(url, env, id, safeNext(url.searchParams.get('next')));
 }
 
+const CLEAR_SESSION = `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
 /** POST /api/auth/logout */
 export async function logout(request: Request, env: Env): Promise<Response> {
   const token = cookie(request, SESSION_COOKIE);
   if (token) await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(await sessionId(token)).run();
-  return json({ ok: true }, 200, { 'set-cookie': `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0` });
+  return json({ ok: true }, 200, { 'set-cookie': CLEAR_SESSION });
 }

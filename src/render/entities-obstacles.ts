@@ -14,6 +14,10 @@ const Z_JITTER = 4;
 /** Pterodactyl bob: ±BOB_PX over one wing-flap cycle (two frames), in sim steps. */
 const BOB_PX = 1;
 const BOB_PERIOD_STEPS = 20;
+/** Celebration: the obstacles sink into the ground one after another, with a little shudder. */
+const BURY_MS = 700;
+const BURY_STAGGER_MS = 90;
+const BURY_SHAKE = 0.7;
 
 interface ObstacleView {
   id: number;
@@ -49,6 +53,10 @@ function easeOutCubic(t: number): number {
   return 1 - u * u * u;
 }
 
+function easeInCubic(t: number): number {
+  return t * t * t;
+}
+
 function easeOutBack(t: number): number {
   const c = 1.6;
   const u = t - 1;
@@ -70,6 +78,8 @@ export interface ObstaclePool {
   readonly root: THREE.Group;
   /** `dtMs` is 0 while paused. */
   update(prev: GameSnapshot, curr: GameSnapshot, alpha: number, dtMs: number, fresh: boolean): void;
+  /** Sink every obstacle into the ground, until the next run. */
+  bury(): void;
   dispose(): void;
 }
 
@@ -78,6 +88,8 @@ export function createObstaclePool(models: ModelLibrary): ObstaclePool {
   root.name = 'obstacles';
   const active: ObstacleView[] = [];
   const free: ObstacleView[] = [];
+  /** ms since bury(), or -1. */
+  let buryMs = -1;
 
   function createView(): ObstacleView {
     const group = new THREE.Group();
@@ -156,6 +168,8 @@ export function createObstaclePool(models: ModelLibrary): ObstaclePool {
     update(prev, curr, alpha, dtMs, fresh) {
       for (let i = 0; i < active.length; i++) active[i].seen = false;
       const simTime = curr.frame + alpha;
+      if (curr.phase !== 'crashed') buryMs = -1;
+      else if (buryMs >= 0) buryMs += dtMs;
 
       for (let k = 0; k < curr.obstacles.length; k++) {
         const o = curr.obstacles[k];
@@ -169,10 +183,20 @@ export function createObstaclePool(models: ModelLibrary): ObstaclePool {
         } else {
           poseCacti(v);
         }
-        v.group.position.set(obstacleX(prev, o, alpha, fresh), y, 0);
+        let x = obstacleX(prev, o, alpha, fresh);
+        if (buryMs >= 0) {
+          const t = THREE.MathUtils.clamp((buryMs - k * BURY_STAGGER_MS) / BURY_MS, 0, 1);
+          y -= (o.y + o.height + 2) * easeInCubic(t);
+          if (t > 0 && t < 1) x += BURY_SHAKE * Math.sin(buryMs * 0.09 + k);
+        }
+        v.group.position.set(x, y, 0);
       }
 
       for (let i = active.length - 1; i >= 0; i--) if (!active[i].seen) release(i);
+    },
+
+    bury() {
+      if (buryMs < 0) buryMs = 0;
     },
 
     dispose() {

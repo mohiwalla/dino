@@ -10,7 +10,7 @@
     <!--
       HUD over a stand-in 3D scene, driven by fake snapshots.
         ?state=title|titlehi|playing|flash|crashed|crashwait|newhigh|paused|night|nightover   (omit to cycle)
-        &touch=1  &night=0..1  &fps=60  &mode=cinematic|side|chase  &muted=1  &config=1  &bg=plain
+        &touch=1  &night=0..1  &fps=60  &mode=cinematic|side  &muted=1  &config=1  &bg=plain
     -->
     <div id="app"><div id="hud"></div></div>
     <script type="module">
@@ -122,10 +122,12 @@
       const fixed = q.get('state');
       const ctx = {
         cameraMode: q.get('mode') ?? 'cinematic',
-        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, startFast: false, mode: 'regular' },
+        settings: { volume: 1, muted: q.get('muted') === '1', ranked: true, showBoard: true, multiplier: 1, mode: 'regular', farts: false, nsfw: false, dayNight: true },
         configOpen: q.get('config') === '1',
+        starOpen: q.get('star') === '1',
         touch: q.get('touch') === '1',
         fps: q.has('fps') ? Number(q.get('fps')) : null,
+        resumeIn: q.has('resumeIn') ? Number(q.get('resumeIn')) : null,
       };
 
       const hud = createHud(document.getElementById('hud'));
@@ -134,7 +136,7 @@
         actions.push(a);
         if (a === 'toggleMute') ctx.settings.muted = !ctx.settings.muted;
         if (a === 'toggleConfig') ctx.configOpen = !ctx.configOpen;
-        if (a === 'toggleCamera') ctx.cameraMode = { cinematic: 'side', side: 'chase', chase: 'cinematic' }[ctx.cameraMode];
+        if (a === 'toggleCamera') ctx.cameraMode = { cinematic: 'side', side: 'cinematic' }[ctx.cameraMode];
       });
       window.__hud = { hud, ctx, actions };
 

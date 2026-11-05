@@ -16,7 +16,7 @@ if (!base) {
 }
 mkdirSync(outDir, { recursive: true });
 
-const MODES = ['cinematic', 'side', 'chase'];
+const MODES = ['cinematic', 'side'];
 const SETTLE_MS = 1600;
 const errors = [];
 const phases = new Set();
@@ -145,9 +145,9 @@ async function mobile() {
   await advanceUntil(page, inView("o.kind !== 'pterodactyl'"), { chunk: 4 });
   await page.waitForTimeout(SETTLE_MS);
   await shot(page, '11-m-cacti-cinematic');
-  await page.evaluate(() => window.__dino.setCameraMode('chase'));
+  await page.evaluate(() => window.__dino.setCameraMode('side'));
   await page.waitForTimeout(SETTLE_MS);
-  await shot(page, '12-m-cacti-chase');
+  await shot(page, '12-m-cacti-side');
   await page.evaluate(() => window.__dino.setAutoplay(false));
   await advanceUntil(page, "s.phase === 'crashed'", { chunk: 1, max: 5000 });
   await page.evaluate(() => window.__dino.advance(60));

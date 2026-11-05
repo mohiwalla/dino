@@ -1,15 +1,19 @@
-// Funny mode's sounds. fart (jump) plays a random recorded clip from ./farts, never the same
-// one twice in a row and at a slightly random pitch; slide (crash) plays a random meme clip
-// from ./crash (NSFW mode adds ./crash/nsfw). The farts are small and all decoded up front; the crash clips are 1.4 MB, so
+// The silly sounds. fart (a jump, with farts on) plays a recorded clip from ./farts at a slightly
+// random pitch; slide (funny mode's crash) plays a meme clip from ./crash, or only from
+// ./crash/nsfw with NSFW on. Both go through a shuffle bag (src/shuffle.ts): every clip plays
+// once before any repeats. The farts are small and all decoded up front; the crash clips are 1.4 MB, so
 // only the next one is fetched and decoded ahead of time, and the service worker caches each
 // as it is fetched rather than precaching them all.
 // Until they have loaded, synthesised stand-ins below play instead:
 //   fart  – a buzzy low sawtooth, wobbled in pitch and sputtered in volume.
 //   slide – a cartoon bonk, then a slide whistle falling away.
 
+import { createShuffleBag } from '../shuffle';
+import { findBeats } from './beats';
+
 const FART_URLS = Object.values(import.meta.glob<string>('./farts/*.mp3', { eager: true, query: '?url', import: 'default' }));
 const SAFE_CRASH_URLS = Object.values(import.meta.glob<string>('./crash/*.mp3', { eager: true, query: '?url', import: 'default' }));
-const ALL_CRASH_URLS = Object.values(import.meta.glob<string>('./crash/**/*.mp3', { eager: true, query: '?url', import: 'default' }));
+const NSFW_CRASH_URLS = Object.values(import.meta.glob<string>('./crash/nsfw/*.mp3', { eager: true, query: '?url', import: 'default' }));
 /** Clip level against the synthesised sounds. */
 const CLIP_GAIN = 1;
 
@@ -96,21 +100,28 @@ export function scheduleSlide(ctx: BaseAudioContext, destination: AudioNode, t0:
 export interface FunnyClips {
   /** Start fetching and decoding the clips (safe to call repeatedly). */
   load(ctx: BaseAudioContext): void;
-  /** NSFW mode: crash clips come from the whole set, not just the safe ones. */
+  /** NSFW on: crash clips come only from the NSFW set. */
   setNsfw(ctx: BaseAudioContext | null, on: boolean): void;
   /** Plays a clip if they have loaded; returns false so the caller can fall back to synthesis. */
   play(ctx: BaseAudioContext, destination: AudioNode, name: 'fart' | 'slide', t0: number): boolean;
   /** Cuts a crash clip still playing (the next run started). */
   stopCrash(): void;
+  /** The hits of the crash clip last started by play('slide'), in seconds; empty if it was synthesised. */
+  readonly crashBeats: readonly number[];
 }
 
 export function createFunnyClips(): FunnyClips {
   let farts: AudioBuffer[] = [];
+  /** Fart indices, each played once before any repeats. */
+  let fartBag = createShuffleBag<number>([]);
   let loading = false;
-  let last = -1;
   let crashUrls = SAFE_CRASH_URLS;
+  /** Crash clips, each played once before any repeats; refilled when NSFW changes the set. */
+  let crashBag = createShuffleBag(crashUrls);
   /** The next crash clip, decoded ahead; `crashUrl` is the one it came from. */
   let nextCrash: AudioBuffer | null = null;
+  let nextBeats: number[] = [];
+  let crashBeats: readonly number[] = [];
   let crashUrl = '';
   let fetchingCrash = false;
   let playingCrash: AudioBufferSourceNode | null = null;
@@ -120,17 +131,17 @@ export function createFunnyClips(): FunnyClips {
       .then((r) => r.arrayBuffer())
       .then((data) => ctx.decodeAudioData(data));
 
-  /** Picks a different random crash clip and decodes it, ready for the next crash. */
+  /** Takes the next crash clip from the bag and decodes it, ready for the next crash. */
   function prepareCrash(ctx: BaseAudioContext): void {
     if (fetchingCrash || nextCrash || crashUrls.length === 0) return;
     fetchingCrash = true;
-    const urls = crashUrls;
-    let i = Math.floor(Math.random() * urls.length);
-    if (urls[i] === crashUrl && urls.length > 1) i = (i + 1) % urls.length;
-    const url = (crashUrl = urls[i]);
+    const url = (crashUrl = crashBag.next());
     decode(ctx, url)
       // Dropped if the mode changed while it decoded and the clip isn't in the new set.
-      .then((b) => (nextCrash = crashUrls.includes(url) ? b : null))
+      .then((b) => {
+        nextCrash = crashUrls.includes(url) ? b : null;
+        nextBeats = nextCrash ? findBeats(nextCrash) : [];
+      })
       .catch(() => undefined)
       .finally(() => (fetchingCrash = false));
   }
@@ -140,15 +151,19 @@ export function createFunnyClips(): FunnyClips {
       if (loading) return;
       loading = true;
       Promise.all(FART_URLS.map((u) => decode(ctx, u)))
-        .then((buffers) => (farts = buffers))
+        .then((buffers) => {
+          farts = buffers;
+          fartBag = createShuffleBag(buffers.map((_, i) => i));
+        })
         .catch(() => (loading = false));
       prepareCrash(ctx);
     },
 
     setNsfw(ctx, on) {
-      const urls = on ? ALL_CRASH_URLS : SAFE_CRASH_URLS;
+      const urls = on ? NSFW_CRASH_URLS : SAFE_CRASH_URLS;
       if (urls === crashUrls) return;
       crashUrls = urls;
+      crashBag = createShuffleBag(urls);
       if (!urls.includes(crashUrl)) nextCrash = null;
       if (ctx && loading) prepareCrash(ctx);
     },
@@ -158,13 +173,11 @@ export function createFunnyClips(): FunnyClips {
       let rate = 1;
       if (name === 'slide') {
         buffer = nextCrash;
+        crashBeats = buffer ? nextBeats : [];
         nextCrash = null;
         prepareCrash(ctx);
       } else if (farts.length > 0) {
-        let i = Math.floor(Math.random() * farts.length);
-        if (i === last && farts.length > 1) i = (i + 1) % farts.length;
-        last = i;
-        buffer = farts[i];
+        buffer = farts[fartBag.next()];
         rate = 0.9 + Math.random() * 0.25;
       }
       if (!buffer) return false;
@@ -181,6 +194,10 @@ export function createFunnyClips(): FunnyClips {
       };
       if (name === 'slide') playingCrash = src;
       return true;
+    },
+
+    get crashBeats() {
+      return crashBeats;
     },
 
     stopCrash() {

@@ -73,14 +73,39 @@
   gap: calc(var(--hud-s) * 4);
 }
 
-.hud:not([data-account='off']):not([data-show-board='false']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
+.hud[data-account='signedIn']:not([data-show-board='false']):is([data-phase='title'], [data-phase='crashed']) .hud-board {
   display: flex;
 }
 
+/* As a run starts with the crown flying back to the board, the board stays a moment to catch it, then fades. */
+.hud[data-account='signedIn']:not([data-show-board='false'])[data-board-linger='true'] .hud-board {
+  display: flex;
+  animation: hud-board-linger var(--hud-linger, 1300ms) ease-in forwards;
+}
+
+@keyframes hud-board-linger {
+  0%,
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .hud-board-rows {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: calc(var(--hud-s) * 2);
+}
+
+/* Marks the spot left of first place where the 3D crown rests (it is drawn by the scene, not here). */
+.hud .hud-board-crown {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  visibility: hidden;
 }
 
 .hud-board-title,
@@ -101,7 +126,8 @@
 @media (max-width: 899px) {
   .hud-board {
     top: auto;
-    bottom: calc(var(--safe-bottom) + var(--hud-margin));
+    /* Clears the GitHub link in the corner (its icon is about 46 px tall). */
+    bottom: calc(var(--safe-bottom) + var(--hud-margin) + 52px);
     left: 0;
     right: 0;
     align-items: center;
@@ -142,7 +168,7 @@
   padding: 0 10px;
   margin: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0;
   background: none;
   color: inherit;
   text-decoration: none;
@@ -166,8 +192,9 @@
 }
 
 .hud-btn:focus-visible {
-  outline: 2px dashed var(--hud-ink);
-  outline-offset: -2px;
+  /* Square and the same weight as the chips' focus ring. */
+  outline: var(--hud-s) dashed var(--hud-ink);
+  outline-offset: calc(var(--hud-s) * -1);
   opacity: 1;
 }
 
@@ -178,6 +205,22 @@
 
 .hud[data-account='signedOut']:is([data-phase='title'], [data-phase='crashed']) .hud-btn-signin {
   display: flex;
+}
+
+/* The GitHub link: bottom-right, out of the way while a run is going. */
+.hud-btn-github {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--safe-right) + var(--hud-margin));
+  bottom: calc(var(--safe-bottom) + var(--hud-margin));
+  /* The icon alone is past the 44 px touch size; no padding keeps both edge gaps equal. */
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.hud[data-phase='playing'] .hud-btn-github {
+  display: none;
 }
 
 .hud[data-touch='true'][data-phase='playing'] .hud-btn-pause,
@@ -259,6 +302,16 @@
   opacity: 0.85;
 }
 
+.hud[data-countdown='true'] .hud-paused .hud-hint {
+  visibility: hidden;
+}
+
+/* The countdown digit, three times the headline size, still crisp. */
+.hud[data-countdown='true'] .hud-paused-title {
+  transform: scale(3);
+  image-rendering: pixelated;
+}
+
 /* ── FPS ── */
 .hud-fps {
   position: absolute;
@@ -297,10 +350,16 @@
   .hud[data-label-peek='true'] .hud-btn-camera .hud-btn-label {
     display: block;
   }
+
+  /* SIGN IN drops its label to its icon, so the bar clears the high score. */
+  .hud-btn-signin .hud-btn-label {
+    display: none;
+  }
 }
 
-/* Narrow and low-density: the 2 px minimum art pixel makes the score too wide to share a row. */
-@media (max-width: 559px) and (max-resolution: 1.49dppx) {
+/* Narrow and low-density (the 2 px minimum art pixel makes the score too wide), or just very
+   narrow: the bar can't share a row with the score, so it drops below it. */
+@media (max-width: 559px) and (max-resolution: 1.49dppx), (max-width: 379px) {
   .hud-bar {
     top: calc(var(--safe-top) + var(--hud-margin) + var(--hud-u) * 9);
   }
@@ -330,7 +389,8 @@
 }
 
 /* ── Config panel ── */
-.hud-config-backdrop {
+.hud-config-backdrop,
+.hud-star-backdrop {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -342,8 +402,50 @@
   pointer-events: auto;
 }
 
-.hud[data-config='true'] .hud-config-backdrop {
+.hud[data-config='true'] .hud-config-backdrop,
+.hud[data-star='true'] .hud-star-backdrop {
   display: flex;
+}
+
+/* ── Star prompt: the GitHub logo beside two lines, then LATER on the left and STAR on the right ── */
+.hud-star {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--hud-s) * 5);
+  max-width: 100%;
+  padding: calc(var(--hud-s) * 10) calc(var(--hud-s) * 12);
+  background: var(--hud-bg, #f7f7f7);
+  box-shadow: 0 0 0 var(--hud-s) var(--hud-ink);
+}
+
+.hud-star-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: calc(var(--hud-s) * 3) calc(var(--hud-s) * 12);
+  margin-top: calc(var(--hud-s) * 5);
+}
+
+.hud-star-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--hud-s) * 8);
+}
+
+.hud-star-lines {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--hud-s) * 5);
+}
+
+/* On narrow screens STAR wraps onto its own line, still on the right. */
+.hud-star-actions .hud-chip-primary {
+  margin-left: auto;
+}
+
+.hud-chip.hud-chip-primary {
+  opacity: 1;
+  background: var(--hud-ink);
 }
 
 .hud-config {
@@ -372,9 +474,37 @@
   opacity: 0.7;
 }
 
+/* PLAYER / SOUND / GAMEPLAY: a faint heading with a rule out to the edge. */
+.hud-config-section {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--hud-s) * 4);
+  margin-top: calc(var(--hud-s) * 4);
+  opacity: 0.45;
+}
+
+.hud-config-section::after {
+  content: '';
+  flex: 1;
+  height: var(--hud-s);
+  background: var(--hud-ink);
+}
+
+.hud .hud-config-label.hud-config-sub {
+  margin-left: calc(var(--hud-s) * 6);
+}
+
+.hud .hud-config-label[hidden] {
+  display: none;
+}
+
 .hud-config-footer {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: calc(var(--hud-s) * 4);
   margin-top: calc(var(--hud-s) * 10);
 }
 
@@ -387,7 +517,8 @@
   box-shadow: none;
 }
 
-.hud-config-footer[hidden] {
+.hud-config-footer[hidden],
+.hud-config-controls[hidden] {
   display: none;
 }
 
@@ -525,6 +656,13 @@
   background: var(--hud-ink);
 }
 
+.hud-switch:disabled,
+.hud-switch:disabled:hover {
+  cursor: default;
+  opacity: 0.3;
+  transform: none;
+}
+
 .hud-switch-knob {
   position: absolute;
   top: calc(var(--hud-s) * 2);
@@ -602,4 +740,32 @@
   .hud-config-controls {
     margin-bottom: calc(var(--hud-s) * 3);
   }
+
+  .hud-config-section {
+    margin-bottom: calc(var(--hud-s) * 2);
+  }
+}
+
+/* ── Confetti: over everything, never in the way of a click ── */
+.hud-confetti {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* A deleted player's board row, decaying where it stood (hud.ts decayRow). */
+.hud-board-ghost {
+  position: fixed;
+  z-index: 1;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+/* Rows with a bolt take the pointer, so hovering shows the multiplier in a tooltip. */
+.hud-board-row[title] {
+  pointer-events: auto;
+  cursor: help;
 }

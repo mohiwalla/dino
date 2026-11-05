@@ -55,7 +55,7 @@ export function createGameSim(opts: GameSimOptions = {}): GameSim {
   let phase: GamePhase = opts.startCrashed ? 'crashed' : 'title';
   let frame = 0;
   let runFrames = 0;
-  /** Speed each run starts at (RUNNER.FAST_START_SPEED for "start fast" runs). */
+  /** Speed each run starts at (RUNNER.FAST_START_SPEED in fast mode). */
   let startSpeed: number = opts.startFast ? RUNNER.FAST_START_SPEED : RUNNER.SPEED;
   let speed = startSpeed;
   let distance = 0;

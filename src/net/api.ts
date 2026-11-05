@@ -13,6 +13,7 @@ export interface BoardEntryData {
   score: number;
   mobile: boolean;
   fast: boolean;
+  multiplier: number;
   runId: string;
   me: boolean;
 }
@@ -38,6 +39,7 @@ export interface StoredRun {
   mobile: boolean;
   afterCrash: boolean;
   fast: boolean;
+  multiplier: number;
   steps: number;
   inputs: number[];
 }
@@ -68,10 +70,11 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: () => call<{ user: Account | null }>('me').then((r) => r.user),
   leaderboard: () => call<BoardData>('leaderboard'),
-  startRun: (body: { mobile: boolean; afterCrash: boolean; fast: boolean; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
+  startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
   beat: (id: string, body: { steps: number; inputs: number[] }) => call<{ ok: true }>(`runs/${id}/beat`, body),
   finish: (id: string, body: { steps: number; inputs: number[] }) => call<FinishResult>(`runs/${id}/finish`, body),
   run: (id: string) => call<StoredRun>(`runs/${encodeURIComponent(id)}`),
   logout: () => call<{ ok: true }>('auth/logout', {}),
+  deleteRuns: () => call<{ ok: true }>('runs/delete', {}),
   loginUrl: (next: string) => `/api/auth/login?next=${encodeURIComponent(next)}`,
 };

@@ -16,7 +16,7 @@ soft shadows. Built with Vite, three.js and TypeScript.
 | Mute | M | Speaker button | – |
 | Dark mode | D | Moon / sun button | – |
 | Pause / resume | P, Escape | Pause button | – |
-| Configuration (account, volume, ranked runs, team board, mode) | ⚙ button | ⚙ button | – |
+| Configuration (account, volume, ranked runs, team board, mode, NSFW, farts, speed multiplier, day/night cycle) | Ctrl/Cmd + Shift + , or ⚙ button | ⚙ button | – |
 | Debug view (collision boxes, FPS) | ` (backquote) | – | – |
 
 The game also pauses on its own when the tab is hidden, and resumes when the tab comes back.
@@ -25,7 +25,6 @@ The game also pauses on its own when the tab is hidden, and resumes when the tab
 
 - **cinematic** (default): a three-quarter view from the side, slightly behind and above.
 - **side**: the classic square-on 2D framing, with a long lens from far away.
-- **chase**: over the shoulder, looking down the track.
 
 The game remembers the last mode you used. On the title screen the camera starts in a close-up and
 swoops out to the play framing when the run starts.
@@ -37,11 +36,12 @@ swoops out to the play framing when the run starts.
 | `?seed=N` | Deterministic obstacle RNG (mulberry32). |
 | `?autoplay=1` | The built-in autopilot plays (and starts) the game. |
 | `?debug=1` | Show collision boxes and an FPS counter. |
-| `?cam=cinematic\|side\|chase` | Starting camera mode (takes priority over the saved one). |
+| `?cam=cinematic\|side` | Starting camera mode (takes priority over the saved one). |
 | `?theme=dark|light` | Starting theme (otherwise the saved choice, then the OS setting). |
 | `?replay=<run id>` | Play back a stored leaderboard run (signed in; see the admin page). |
+| `?star` | Open the "star it on GitHub" prompt at once, even if it was already answered. |
 
-For tests, `window.__dino` exposes `getSnapshot()`, `advance(n, input?)`, `setAutoplay(on)`,
+For tests, `window.__dino` (on localhost, or for an admin signed in on the live site) exposes `getSnapshot()`, `advance(n, input?)`, `setAutoplay(on)`,
 `setCameraMode(mode)`, `freeze(on)` (stop real-time stepping, keep rendering), `info` (triangles,
 draw calls) and `fps`.
 
@@ -96,12 +96,15 @@ The browser never sends a score. A ranked run works like this:
 
 The server also checks the run against its own clock and against the autopilot:
 
-- A run that plays steps faster than real time is rejected.
+- Real time is measured at the run's speed multiplier (0.5x to 3x, chosen in settings and tagged
+  on the board): at 2x the server expects 120 steps a second.
+- A run that plays steps faster than that is rejected.
 - These runs go to an admin for review, and stay off the board until approved:
-  - runs slower than real time (slow motion);
+  - runs slower than that (slow motion);
   - runs with more than 3 pauses;
   - runs whose jumps land on the autopilot's exact step;
-  - runs whose jump holds are all the same length.
+  - runs whose jumps come at the same distance from the obstacles, or whose jump holds or
+    mid-air ducks are mostly the same length (both machine-like).
 
 Admins (`ADMIN_EMAILS`) use `/admin` to watch runs (`?replay=`), approve or void them, and ban
 players.

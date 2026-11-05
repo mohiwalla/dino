@@ -30,7 +30,7 @@ const PAD_DOWN = 13;
 
 function actionFor(e: KeyboardEvent): UiAction | null {
   if (e.code === 'Backquote') return 'toggleDebug';
-  if (e.code === 'Escape') return 'togglePause';
+  if (e.code === 'Escape') return 'escape';
   // Chrome's autofill dispatches keydown events without a key.
   switch (typeof e.key === 'string' ? e.key.toLowerCase() : '') {
     case 'c':
@@ -99,6 +99,12 @@ export function createInput(): InputController {
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    // Ctrl/Cmd + Shift + , opens and closes the settings, from anywhere (inside the panel too).
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'Comma') {
+      e.preventDefault();
+      if (!e.repeat) emit('toggleConfig');
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     // Enter activates a focused HUD button; Space only does inside a dialog (the config panel),
     // so the game still jumps on Space after focus returns to a HUD button.

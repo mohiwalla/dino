@@ -61,8 +61,6 @@ export interface ModeSpec {
 
 /** The standing T-Rex (with some depth) and ~450 px of track ahead of its nose, up to pterodactyl height. */
 const PLAY_KEEP = [-4, 0, 8, 48, 0, 8, -4, 50, -8, 48, 50, -8, 500, 0, 0, 500, 50, 0];
-/** Chase sits right behind the T-Rex: keep its silhouette (feet, tail, head) rather than its box corners. */
-const CHASE_KEEP = [22, 0, 0, 0, 25, 0, 44, 47, 0, 500, 0, 0, 500, 50, 0];
 /** The idle T-Rex with breathing room. */
 const TITLE_KEEP = [-16, -2, 10, 60, -2, 10, -16, 60, -10, 60, 60, -10];
 
@@ -84,22 +82,12 @@ export const MODES: Readonly<Record<CameraMode, ModeSpec>> = {
     margin: 0.94,
     follow: 0,
   },
-  chase: {
-    base: framing(280, 25, -80, 9, 200, 48),
-    maxFov: 70,
-    anchorX: null,
-    portrait: { base: framing(260, 28, -87, 13, 250, 52), anchorX: null },
-    keep: CHASE_KEEP,
-    margin: 0.92,
-    follow: 0.25,
-  },
 };
 
 /** Title close-ups, one per mode so the swoop out starts from a matching angle. */
 export const TITLES: Readonly<Record<CameraMode, ModeSpec>> = {
   cinematic: { base: framing(22, 15, -28, 9, 82, 30), maxFov: 45, anchorX: null, keep: TITLE_KEEP, margin: 0.85, follow: 0 },
   side: { base: framing(22, 15, 0, 3, 82, 30), maxFov: 45, anchorX: null, keep: TITLE_KEEP, margin: 0.85, follow: 0 },
-  chase: { base: framing(22, 15, -50, 10, 82, 30), maxFov: 45, anchorX: null, keep: TITLE_KEEP, margin: 0.85, follow: 0 },
 };
 
 /** The T-Rex's centre, pinned at ModeSpec.anchorX. */

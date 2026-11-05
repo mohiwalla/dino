@@ -13,7 +13,7 @@ import { sculptPterodactyl } from './models-ptero';
 
 type CactusKind = 'cactusSmall' | 'cactusLarge';
 
-const TREX_FRAMES: readonly TrexFrame[] = ['idle', 'blink', 'run1', 'run2', 'jump', 'crashed', 'duck1', 'duck2'];
+const TREX_FRAMES: readonly TrexFrame[] = ['idle', 'blink', 'run1', 'run2', 'jump', 'crashed', 'duck1', 'duck2', 'happy'];
 
 /**
  * Per-variant arm swing out of the side plane: Z offset per px of reach (+ = toward the

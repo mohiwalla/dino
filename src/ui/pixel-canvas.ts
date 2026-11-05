@@ -16,10 +16,12 @@ export interface Tones {
   bg: string;
   /** Red for destructive actions (sign out). */
   danger: string;
+  /** Gold for the star prompt's star, readable on an ink fill. */
+  gold: string;
 }
 
-/** bg: knocked out of an ink fill. danger: drawn in red. */
-export type Tint = 'bg' | 'danger' | null;
+/** bg: knocked out of an ink fill. danger: drawn in red. gold: drawn in gold. */
+export type Tint = 'bg' | 'danger' | 'gold' | null;
 
 /** Empty art pixels around the mask, room for the halo. */
 export const PAD = 1;

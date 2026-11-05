@@ -71,7 +71,7 @@
         key('keydown', 'Escape', { key: 'Escape' });
         key('keydown', 'Backquote', { key: '`' });
         key('keydown', 'KeyC', { key: 'c', repeat: true });
-        check('UI actions', JSON.stringify(actions) === JSON.stringify(['toggleCamera', 'toggleMute', 'togglePause', 'togglePause', 'toggleDebug']), JSON.stringify(actions));
+        check('UI actions', JSON.stringify(actions) === JSON.stringify(['toggleCamera', 'toggleMute', 'togglePause', 'escape', 'toggleDebug']), JSON.stringify(actions));
         const ctrl = new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', ctrlKey: true, cancelable: true });
         window.dispatchEvent(ctrl);
         check('Ctrl+C left to the browser', actions.length === 5 && !ctrl.defaultPrevented);
@@ -126,7 +126,7 @@
           threw = true;
         }
         check('play/unlock never throw', !threw);
-        for (const name of ['jump', 'milestone', 'crash']) {
+        for (const name of ['jump', 'milestone', 'crash', 'victory']) {
           const rate = 44100;
           const ctx = new OfflineAudioContext(1, rate * 0.5, rate);
           const master = ctx.createGain();

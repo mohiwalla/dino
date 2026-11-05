@@ -21,10 +21,14 @@ export interface RankedOptions {
   /** The sim being played (main.ts swaps it for replays). */
   sim: () => GameSim;
   mobile: boolean;
-  /** Whether runs start fast (read when each run starts; the sim already uses the same setting). */
-  fast: () => boolean;
+  /** The game speed multiplier (read when each run starts; main.ts plays the run at the same one). */
+  multiplier: () => number;
   /** False while runs can't be ranked (ranking off, autopilot, ?seed=, a replay). */
   rankable: () => boolean;
+  /** A run passed the checks and the player's best puts them at `rank` on the board. */
+  onRank: (rank: number) => void;
+  /** The server (not the cached account) says the player is an admin. */
+  onAdmin: () => void;
   onView: (view: BoardView) => void;
 }
 
@@ -36,6 +40,10 @@ export interface Ranked {
   /** Something made the current run unfair (debug view, autopilot) or ranking was turned off: it stops counting. */
   forfeit(): void;
   signOut(): Promise<void>;
+  /** The run that just crashed was ranked, so its celebration waits for the server's rank. */
+  readonly lastRunRanked: boolean;
+  /** Deletes all the player's runs, taking them off the board; they stay signed in. Resolves to whether it worked. */
+  deleteStats(): Promise<boolean>;
   readonly account: Account | null;
 }
 
@@ -84,6 +92,9 @@ export function createRanked(opts: RankedOptions): Ranked {
   let run: Run | null = null;
   let note = '';
   let live = '';
+  let newBest: BoardView['newBest'] = null;
+  let statsDeleted: BoardView['statsDeleted'] = null;
+  let lastRunRanked = false;
   /** The last finish upload; the next run's start waits for it, so it can't abandon that run. */
   let finishing: Promise<unknown> = Promise.resolve();
 
@@ -94,16 +105,17 @@ export function createRanked(opts: RankedOptions): Ranked {
       score: e.score,
       mobile: e.mobile,
       fast: e.fast,
+      multiplier: e.multiplier,
       me: e.me,
     }));
     if (board?.me && board.me.rank > BOARD_ROWS) {
-      entries.push({ rank: board.me.rank, name: account?.name ?? '', score: board.me.score, mobile: false, fast: false, me: true });
+      entries.push({ rank: board.me.rank, name: account?.name ?? '', score: board.me.score, mobile: false, fast: false, multiplier: 1, me: true });
     }
     let shownNote = note;
     if (!shownNote && account?.banned) shownNote = 'BANNED FROM THE BOARD';
     else if (!shownNote && reachable && !account) shownNote = 'SIGN IN TO JOIN THE TEAM BOARD';
     else if (!shownNote && account && entries.length === 0) shownNote = 'NO RANKED RUNS YET';
-    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, note: shownNote, live });
+    opts.onView({ account: !reachable ? 'off' : account ? 'signedIn' : 'signedOut', name: account?.name ?? null, email: account?.email ?? null, entries, note: shownNote, live, newBest, statsDeleted });
   }
 
   async function refresh(): Promise<void> {
@@ -113,6 +125,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       account = me;
       board = me ? data : null;
       reachable = true;
+      if (me?.admin) opts.onAdmin();
       writeCache({ account, board });
     } catch {
       // Offline, or a plain static host without the server: no leaderboard UI at all.
@@ -173,6 +186,8 @@ export function createRanked(opts: RankedOptions): Ranked {
   }
 
   async function finish(r: Run): Promise<void> {
+    /** Where the player stood before this run, to tell a rank up. */
+    const before = board?.me?.rank ?? null;
     while (r.sending) await r.sending;
     note = 'CHECKING RUN';
     publish();
@@ -190,12 +205,18 @@ export function createRanked(opts: RankedOptions): Ranked {
     else if (result.status === 'rejected') note = 'RUN FAILED THE CHECKS';
     else if (result.previousBest === null || (result.score ?? 0) > result.previousBest) note = `NEW BEST! RANK ${result.rank}`;
     else note = `YOUR BEST IS RANK ${result.rank}`;
+    if (result?.status === 'ok' && result.rank !== null) {
+      opts.onRank(result.rank);
+      // A new best is cheered whether or not it moves the rank (staying #1 with a higher score counts).
+      if (before === null || result.previousBest === null || (result.score ?? 0) > result.previousBest || result.rank < before) newBest = { from: before, to: result.rank };
+    }
     await refresh();
+    newBest = null;
   }
 
   function begin(afterCrash: boolean, first: InputFrame): void {
     opts.sim().setObstacleRandom(null);
-    const fast = opts.fast();
+    const multiplier = opts.multiplier();
     const r: Run = { recorder: createInputRecorder(), afterCrash, state: 'starting', id: null, unsent: [], sending: null, beatAgain: false, timer: 0 };
     r.recorder.record(first);
     run = r;
@@ -206,7 +227,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       return;
     }
     finishing
-      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, fast, simVersion: SIM_VERSION }))
+      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: SIM_VERSION }))
       .then(({ id, seed }) => {
         if (r.state !== 'starting') return;
         const sim = opts.sim();
@@ -245,6 +266,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       if (!started) run.recorder.record(input);
       if (events.some((e) => e.type === 'crash')) {
         const ranked = run.state === 'ranked';
+        lastRunRanked = ranked;
         clearInterval(run.timer);
         run.state = 'finished';
         live = '';
@@ -267,8 +289,23 @@ export function createRanked(opts: RankedOptions): Ranked {
       note = '';
       await refresh();
     },
+    async deleteStats() {
+      if (run && (run.state === 'starting' || run.state === 'ranked')) unranked(run);
+      const deleted = await api.deleteRuns().then(
+        () => true,
+        () => false,
+      );
+      note = deleted ? 'STATS DELETED' : 'COULD NOT DELETE STATS';
+      statsDeleted = deleted ? {} : null;
+      await refresh();
+      statsDeleted = null;
+      return deleted;
+    },
     get account() {
       return account;
+    },
+    get lastRunRanked() {
+      return lastRunRanked;
     },
   };
 }

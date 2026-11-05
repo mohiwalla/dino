@@ -2,6 +2,8 @@
 //   jump      – "button-press": a very short, bright square blip.
 //   milestone – "score-reached": two quick high beeps.
 //   crash     – "hit": a short, low, falling buzz.
+// Plus our own:
+//   victory   – a rank up or a new best: an 8-bit fanfare, a run up C major into a held chord.
 // Every note has a few-ms attack and release so nothing clicks. The AudioContext is created
 // lazily and only plays once a user gesture has unlocked it; without WebAudio it is silent.
 
@@ -27,7 +29,7 @@ interface Note {
 }
 
 /** Note lists per sound; times and pitches tuned by ear against Chrome's samples. */
-export const SFX_NOTES: Readonly<Record<'jump' | 'milestone' | 'crash', readonly Note[]>> = {
+export const SFX_NOTES: Readonly<Record<'jump' | 'milestone' | 'crash' | 'victory', readonly Note[]>> = {
   jump: [{ type: 'square', at: 0, dur: 0.06, freq: 780, freqEnd: 1040, gain: 0.32, lowpass: 5200 }],
   milestone: [
     { type: 'square', at: 0, dur: 0.075, freq: 1318.5, gain: 0.26, lowpass: 6000 },
@@ -36,6 +38,21 @@ export const SFX_NOTES: Readonly<Record<'jump' | 'milestone' | 'crash', readonly
   crash: [
     { type: 'sawtooth', at: 0, dur: 0.2, freq: 150, freqEnd: 58, gain: 0.55, lowpass: 1400 },
     { type: 'square', at: 0, dur: 0.2, freq: 75, freqEnd: 40, gain: 0.32, lowpass: 900 },
+  ],
+  // Lead C5 E5 G5 C6, a bounce to G5, then C6 held over an E5 G5 harmony; triangle bass C G C.
+  victory: [
+    { type: 'square', at: 0, dur: 0.09, freq: 523.25, gain: 0.2, lowpass: 6000 },
+    { type: 'square', at: 0.1, dur: 0.09, freq: 659.25, gain: 0.2, lowpass: 6000 },
+    { type: 'square', at: 0.2, dur: 0.09, freq: 783.99, gain: 0.2, lowpass: 6000 },
+    { type: 'square', at: 0.3, dur: 0.18, freq: 1046.5, gain: 0.22, lowpass: 6000 },
+    { type: 'square', at: 0.3, dur: 0.18, freq: 659.25, gain: 0.1, lowpass: 5000 },
+    { type: 'square', at: 0.5, dur: 0.09, freq: 783.99, gain: 0.2, lowpass: 6000 },
+    { type: 'square', at: 0.6, dur: 0.5, freq: 1046.5, gain: 0.22, lowpass: 6000 },
+    { type: 'square', at: 0.6, dur: 0.5, freq: 783.99, gain: 0.1, lowpass: 5000 },
+    { type: 'square', at: 0.6, dur: 0.5, freq: 659.25, gain: 0.08, lowpass: 5000 },
+    { type: 'triangle', at: 0, dur: 0.26, freq: 130.81, gain: 0.45 },
+    { type: 'triangle', at: 0.3, dur: 0.26, freq: 98, gain: 0.45 },
+    { type: 'triangle', at: 0.6, dur: 0.5, freq: 130.81, gain: 0.45 },
   ],
 };
 
@@ -117,6 +134,7 @@ export function createSfx(): Sfx {
   let volume = readVolume();
   let ctx: AudioContext | null = null;
   const clips = createFunnyClips();
+  let crashBeats: readonly number[] = [];
   let master: GainNode | null = null;
   let failed = false;
 
@@ -130,7 +148,7 @@ export function createSfx(): Sfx {
     try {
       ctx = new Ctor({ latencyHint: 'interactive' });
       master = ctx.createGain();
-      master.gain.value = MASTER_GAIN * volume;
+      master.gain.value = muted ? 0 : MASTER_GAIN * volume; // `away` starts false
       master.connect(ctx.destination);
     } catch {
       failed = true;
@@ -158,14 +176,38 @@ export function createSfx(): Sfx {
   // gestures themselves. Kept for the page's lifetime: iOS re-suspends after interruptions.
   for (const type of ['pointerdown', 'keydown', 'touchend'] as const) window.addEventListener(type, unlock, { capture: true, passive: true });
 
+  // Away from the page (another window or tab) works like a temporary mute: the master gain
+  // drops to zero and comes back on return, while anything playing (a crash clip) keeps time.
+  let away = false;
+  const level = (): number => (muted || away ? 0 : MASTER_GAIN * volume);
+  const applyLevel = (): void => {
+    if (ctx && master) master.gain.setTargetAtTime(level(), ctx.currentTime, 0.01);
+  };
+  const checkAway = (): void => {
+    const next = document.visibilityState === 'hidden' || !document.hasFocus();
+    if (next === away) return;
+    away = next;
+    applyLevel();
+  };
+  window.addEventListener('blur', checkAway);
+  window.addEventListener('focus', checkAway);
+  document.addEventListener('visibilitychange', checkAway);
+
   return {
     play(name: SfxName): void {
-      if (muted || !ctx || !master || ctx.state !== 'running') return;
+      if (name === 'slide') crashBeats = [];
+      if (!ctx || !master || ctx.state !== 'running') return;
+      // Muted or away, short sounds are skipped; the crash clip still runs (silent) so unmuting partway
+      // through it brings it in where it would be.
+      if ((muted || away) && name !== 'slide') return;
       try {
         const t0 = ctx.currentTime + 0.005;
         if (name === 'fart' || name === 'slide') {
           clips.load(ctx);
-          if (clips.play(ctx, master, name, t0)) return;
+          if (clips.play(ctx, master, name, t0)) {
+            if (name === 'slide') crashBeats = clips.crashBeats;
+            return;
+          }
         }
         scheduleSfx(ctx, master, name, t0);
       } catch {
@@ -181,6 +223,8 @@ export function createSfx(): Sfx {
       if (value === muted) return;
       muted = value;
       writeMuted(value);
+      // Mute is the master gain at zero: what's playing carries on silently, like a volume knob.
+      applyLevel();
     },
 
     get volume(): number {
@@ -190,10 +234,14 @@ export function createSfx(): Sfx {
     setVolume(value: number): void {
       volume = Math.min(1, Math.max(0, value));
       writeVolume(volume);
-      if (ctx && master) master.gain.setTargetAtTime(MASTER_GAIN * volume, ctx.currentTime, 0.01);
+      applyLevel();
     },
 
     unlock,
+
+    get crashBeats() {
+      return crashBeats;
+    },
 
     stopFunny() {
       clips.stopCrash();
