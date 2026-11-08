@@ -32,6 +32,7 @@ import {
   type UiAction,
 } from './types';
 import { createHud } from './ui/hud';
+import { urlSetting } from './url-settings';
 
 /** A single rendered frame never feeds more than this much time to the accumulator. */
 const MAX_FRAME_MS = 250;
@@ -65,7 +66,10 @@ function isCameraMode(value: string | null): value is CameraMode {
   return value !== null && (CAMERA_MODES as readonly string[]).includes(value);
 }
 
+/** A saved value, or this visit's ?setting= in its place (src/url-settings.ts). */
 function readStorage(key: string): string | null {
+  const fromUrl = urlSetting(key);
+  if (fromUrl !== null) return fromUrl;
   try {
     return localStorage.getItem(key);
   } catch {

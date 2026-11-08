@@ -8,6 +8,7 @@
 // lazily and only plays once a user gesture has unlocked it; without WebAudio it is silent.
 
 import { STORAGE_KEYS } from '../config';
+import { urlSetting } from '../url-settings';
 import type { Sfx, SfxName } from '../types';
 import { createFunnyClips, scheduleFart, scheduleSlide } from './funny';
 
@@ -90,7 +91,7 @@ export function scheduleSfx(ctx: BaseAudioContext, destination: AudioNode, name:
 
 function readMuted(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEYS.muted) === '1';
+    return (urlSetting(STORAGE_KEYS.muted) ?? localStorage.getItem(STORAGE_KEYS.muted)) === '1';
   } catch {
     return false;
   }
@@ -107,7 +108,7 @@ function writeMuted(muted: boolean): void {
 /** 0..1, scales MASTER_GAIN. Defaults to full. */
 function readVolume(): number {
   try {
-    const v = Number(localStorage.getItem(STORAGE_KEYS.volume) ?? '1');
+    const v = Number(urlSetting(STORAGE_KEYS.volume) ?? localStorage.getItem(STORAGE_KEYS.volume) ?? '1');
     return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
   } catch {
     return 1;

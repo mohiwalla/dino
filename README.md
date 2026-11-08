@@ -39,10 +39,19 @@ swoops out to the play framing when the run starts.
 | `?debug=1` | Show collision boxes and an FPS counter. |
 | `?cam=cinematic\|side` | Starting camera mode (takes priority over the saved one). |
 | `?theme=dark|light` | Starting theme (otherwise the saved choice, then the OS setting). |
+| `?funny=true\|false` | Funny or regular mode (also `?mode=funny\|regular`). |
+| `?nsfw=` `?farts=` `?daynight=` | Funny mode's NSFW clips, farts, and the day/night cycle (`true\|false`, `1\|0`, `on\|off`). |
+| `?volume=0..100` | Sound volume in percent; unmutes unless `?muted=true` is given too. |
+| `?muted=true\|false` | Mute the game. |
+| `?multiplier=1\|1.25\|1.5\|1.75\|2` | Game speed multiplier (also `?speed=`, and `1.5x` works). |
+| `?ranked=` `?board=` `?period=week\|all` | Ranked runs, the team board shown or hidden, and which board. |
 | `?replay=<run id>` | Play back a stored leaderboard run (signed in; see the admin page). |
 | `?star` | Open the "star it on GitHub" prompt at once, even if it was already answered. |
 | `?winners` | Show last week's winners banner now (with the board's top 3 if last week had none). |
 | `?stale` | Pretend this tab is from before the latest game update, to see the reload message. |
+
+The settings params (`?funny` through `?period`) apply to that visit only: they stand in for the saved
+config without changing it. Changing a setting in the config panel still saves it as usual.
 
 For tests, `window.__dino` (on localhost, or for an admin signed in on the live site) exposes `getSnapshot()`, `advance(n, input?)`, `setAutoplay(on)`,
 `setCameraMode(mode)`, `freeze(on)` (stop real-time stepping, keep rendering), `info` (triangles,
