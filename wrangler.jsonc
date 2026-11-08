@@ -18,14 +18,11 @@
       "migrations_dir": "migrations"
     }
   ],
-  "routes": [
-    { "pattern": "dino.mohiwalla.com", "custom_domain": true },
-    { "pattern": "dino-next.mohiwalla.com", "custom_domain": true }
-  ],
+  "routes": [{ "pattern": "dino.mohiwalla.com", "custom_domain": true }],
   "workers_dev": false,
   "observability": { "enabled": true },
   "vars": {
-    "ORIGINS": "https://dino.mohiwalla.com,https://dino-next.mohiwalla.com",
+    "ORIGINS": "https://dino.mohiwalla.com",
     // Single-tenant app registration "Dino 3D Leaderboard" in the Sifars tenant.
     "ENTRA_TENANT_ID": "9698f849-129c-4757-bbfa-9c804f1ac921",
     "ENTRA_CLIENT_ID": "c7fd95ce-08f0-4cb8-b9d5-8b6f60935f16",
