@@ -744,7 +744,7 @@ export function createHud(root: HTMLElement): Hud {
       if (!rowCanvases[i]) rowCanvases.push(add(boardRows, createMask(1, GLYPH_H), 'hud-board-row', 'small', isMenu));
       rowCanvases[i].setMask(boardRow(e, e.me ? 1 : 2));
       rowCanvases[i].el.classList.toggle('hud-board-me', e.me);
-      const note = speedNote(e);
+      const note = [speedNote(e), e.mobile ? 'on mobile' : ''].filter(Boolean).join(', ');
       if (note) rowCanvases[i].el.title = note;
       else rowCanvases[i].el.removeAttribute('title');
       rowCanvases[i].el.hidden = false;
