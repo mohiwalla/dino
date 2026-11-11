@@ -179,10 +179,24 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
   // The game cheers a ranked run that beats the player's best (or is their first); its replay does too.
   const cheered = verdict.status === 'ok' && (previousBest === null || (score ?? 0) > previousBest);
   const updated = await env.DB.prepare(
-    `UPDATE runs SET steps = ?, inputs = ?, beats = ?, finished_at = ?, score = ?, status = ?, flags = ?, look = ?, cheered = ?
+    `UPDATE runs SET steps = ?, inputs = ?, beats = ?, finished_at = ?, score = ?, status = ?, verdict = ?, flags = ?, checks = ?, look = ?, cheered = ?
      WHERE id = ? AND status = 'open' AND steps = ?`,
   )
-    .bind(next.steps, JSON.stringify(next.inputs), JSON.stringify(next.beats), now, score, verdict.status, flags, cleanLook(body.look, next.steps), cheered ? 1 : 0, id, run.steps)
+    .bind(
+      next.steps,
+      JSON.stringify(next.inputs),
+      JSON.stringify(next.beats),
+      now,
+      score,
+      verdict.status,
+      verdict.status,
+      flags,
+      JSON.stringify(verdict.checks),
+      cleanLook(body.look, next.steps),
+      cheered ? 1 : 0,
+      id,
+      run.steps,
+    )
     .run();
   if (updated.meta.changes !== 1) throw new HttpError(409, 'run already finished');
   if (verdict.status !== 'ok') console.log(`run ${id} by ${user.email}: ${verdict.status} (${flags})`);
@@ -195,18 +209,21 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
 }
 
 /**
- * POST /api/runs/delete: every run the player has made, so they leave the board; the account
- * stays. Banned players can't, so their flagged runs stay for review.
+ * POST /api/runs/delete: hides every run the player has made, so they leave the board and start
+ * their stats afresh; the account stays. Admins still see the runs (and their reviews go on), so a
+ * flagged run can't be deleted out of the way. Banned players can't.
  */
 export async function deleteRuns(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   playable(user);
-  await env.DB.prepare('DELETE FROM runs WHERE user_id = ?').bind(user.id).run();
+  await env.DB.prepare('UPDATE runs SET hidden = 1 WHERE user_id = ?').bind(user.id).run();
   return json({ ok: true });
 }
 
 async function bestScore(env: Env, userId: string): Promise<number | null> {
-  const row = await env.DB.prepare("SELECT MAX(score) AS best FROM runs WHERE user_id = ? AND status = 'ok'").bind(userId).first<{ best: number | null }>();
+  const row = await env.DB.prepare("SELECT MAX(score) AS best FROM runs WHERE user_id = ? AND status = 'ok' AND hidden = 0")
+    .bind(userId)
+    .first<{ best: number | null }>();
   return row?.best ?? null;
 }
 
@@ -218,7 +235,7 @@ export async function myRuns(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const rows = await env.DB.prepare(
     `SELECT id, score, status, mobile, fast, multiplier, steps, finished_at FROM runs
-     WHERE user_id = ? AND status NOT IN ('open', 'abandoned') ORDER BY finished_at DESC LIMIT 500`,
+     WHERE user_id = ? AND status NOT IN ('open', 'abandoned') AND hidden = 0 ORDER BY finished_at DESC LIMIT 500`,
   )
     .bind(user.id)
     .all<{ id: string; score: number | null; status: string; mobile: number; fast: number; multiplier: number; steps: number; finished_at: number }>();
@@ -237,16 +254,16 @@ export async function myRuns(request: Request, env: Env): Promise<Response> {
   });
 }
 
-/** GET /api/runs/:id -- a finished run, for ?replay=. Runs still under review: admins only. */
+/** GET /api/runs/:id -- a finished run, for ?replay=. Runs still under review: admins and their player. Deleted runs: admins only. */
 export async function getRun(request: Request, env: Env, id: string): Promise<Response> {
   const user = await requireUser(request, env);
   const run = await env.DB.prepare(
-    `SELECT r.id, r.seed, r.mobile, r.after_crash, r.fast, r.multiplier, r.sim_version, r.steps, r.inputs, r.score, r.status, r.user_id, r.look, r.cheered, u.name
+    `SELECT r.id, r.seed, r.mobile, r.after_crash, r.fast, r.multiplier, r.sim_version, r.steps, r.inputs, r.score, r.status, r.hidden, r.user_id, r.look, r.cheered, u.name
      FROM runs r JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
   )
     .bind(id)
-    .first<{ id: string; seed: number; mobile: number; after_crash: number; fast: number; multiplier: number; sim_version: number; steps: number; inputs: string; score: number | null; status: string; user_id: string; look: string | null; cheered: number; name: string }>();
-  const visible = run && run.status !== 'open' && run.status !== 'abandoned' && (run.status === 'ok' || user.admin || run.user_id === user.id);
+    .first<{ id: string; seed: number; mobile: number; after_crash: number; fast: number; multiplier: number; sim_version: number; steps: number; inputs: string; score: number | null; status: string; hidden: number; user_id: string; look: string | null; cheered: number; name: string }>();
+  const visible = run && run.status !== 'open' && run.status !== 'abandoned' && (user.admin || (run.hidden === 0 && (run.status === 'ok' || run.user_id === user.id)));
   if (!run || !visible) throw new HttpError(404, 'no such run');
   return json({
     id: run.id,
