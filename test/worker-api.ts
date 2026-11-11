@@ -14,21 +14,20 @@ const MIGRATIONS = join(import.meta.dir, '..', 'migrations');
 
 /** The slice of D1's API the Worker uses, over bun:sqlite. */
 function d1(db: Database): D1Database {
-  const statement = (sql: string, params: unknown[] = []) => ({
-    bind: (...values: unknown[]) => statement(sql, values),
-    first: async () => db.query(sql).get(...(params as never[])) ?? null,
-    all: async () => ({ results: db.query(sql).all(...(params as never[])) }),
-    run: async () => ({ meta: { changes: db.query(sql).run(...(params as never[])).changes } }),
-  });
+  const statement = (sql: string, params: unknown[] = []) => {
+    const exec = () => ({ meta: { changes: db.query(sql).run(...(params as never[])).changes } });
+    return {
+      bind: (...values: unknown[]) => statement(sql, values),
+      first: async () => db.query(sql).get(...(params as never[])) ?? null,
+      all: async () => ({ results: db.query(sql).all(...(params as never[])) }),
+      run: async () => exec(),
+      exec,
+    };
+  };
   return {
     prepare: (sql: string) => statement(sql),
-    batch: async (statements: ReturnType<typeof statement>[]) => {
-      const results: unknown[] = [];
-      db.transaction(() => {
-        for (const s of statements) results.push(s.run());
-      })();
-      return Promise.all(results);
-    },
+    // Like D1, all or nothing: a failing statement throws out of the transaction, which rolls back.
+    batch: async (statements: ReturnType<typeof statement>[]) => db.transaction(() => statements.map((s) => s.exec()))(),
   } as unknown as D1Database;
 }
 
