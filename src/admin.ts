@@ -13,6 +13,10 @@ interface AdminRun {
   email: string;
   score: number | null;
   status: string;
+  /** What the checks decided, before any admin decision (null for runs from before it was kept). */
+  verdict: string | null;
+  /** The player deleted their stats: off the board and their list, still here. */
+  hidden: number;
   flags: string | null;
   mobile: number;
   fast: number;
@@ -74,7 +78,7 @@ function runsTable(runs: AdminRun[]): HTMLElement {
       return [
         player(r),
         r.score === null ? '-' : String(r.score),
-        pill(r.status),
+        status(r),
         r.flags ? h('span', { className: 'why' }, pxWords(r.flags.toUpperCase())) : '',
         h('span', { className: 'cell' }, px(duration(r.steps)), h('span', { className: 'note' }, px(`${speed(r)}${r.mobile ? ' 📱' : ''}`))),
         time(r.finished_at),
@@ -82,6 +86,14 @@ function runsTable(runs: AdminRun[]): HTMLElement {
       ];
     }),
   );
+}
+
+/** The run's status, with what the checks said if an admin has since changed it, and whether the player deleted it. */
+function status(r: AdminRun): HTMLElement {
+  const notes: string[] = [];
+  if (r.verdict && r.verdict !== r.status) notes.push(`CHECKS: ${r.verdict === 'ok' ? 'PASSED' : r.verdict.toUpperCase()}`);
+  if (r.hidden) notes.push('DELETED BY PLAYER');
+  return h('span', { className: 'cell' }, pill(r.status), ...notes.map((n) => h('span', { className: 'note' }, px(n))));
 }
 
 function usersTable(): HTMLElement {
