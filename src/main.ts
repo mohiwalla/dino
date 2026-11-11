@@ -17,8 +17,10 @@ import { createInputCursor, createRunSim } from './sim/replay';
 import { mulberry32 } from './sim/rng';
 import {
   CAMERA_MODES,
+  CROWN_PLACES,
   type BoardView,
   type CameraMode,
+  type CrownPlace,
   type CrownSpot,
   type GameEvent,
   type GameMode,
@@ -190,8 +192,8 @@ function main(): void {
   /** The high score on screen as this run started, and the seed of its fart sounds (RunLook). */
   let runHi = 0;
   let runFx = 0;
-  /** The T-Rex wore the crown as this run started (RunLook.crown). */
-  let runCrown = false;
+  /** The crown the T-Rex wore as this run started, if any (RunLook.crown and .place). */
+  let runCrown: CrownPlace | null = null;
   /** What the replay shows in place of the leaderboard's lines, once it has loaded (or failed). */
   let replayLabel: Pick<BoardView, 'note' | 'live'> | null = replayId ? { note: 'LOADING REPLAY', live: '' } : null;
   let board: BoardView | null = null;
@@ -225,23 +227,23 @@ function main(): void {
     nsfw: readToggle(STORAGE_KEYS.nsfw, readStorage(STORAGE_KEYS.mode) === 'nsfw'),
     dayNight: readStorage(STORAGE_KEYS.dayNight) !== '0',
   };
-  /** The player is #1 on the team board, so the T-Rex wears the crown on the title screen. */
-  let first = false;
-  /** Celebrating on this game-over screen: the crown flew in from the board and stays till the next run. */
-  let crownedNow = false;
-  /** A celebration wants the crown flown in as soon as the board is showing. */
+  /** The player's place on the team board if in the top 3, so the T-Rex wears its crown on the title screen. */
+  let place: CrownPlace | null = null;
+  /** Celebrating on this game-over screen: this crown flew in from the board and stays till the next run. */
+  let crowned: CrownPlace | null = null;
+  /** A celebration wants a crown flown in as soon as the board is showing. */
   let crownDue = false;
-  /** The crown is on show (as last told to the T-Rex). */
-  let crownOn = false;
+  /** The crown on show (as last told to the T-Rex), or null. */
+  let crownOn: CrownPlace | null = null;
 
   /**
-   * Where the crown rests by the board's first place: as tall as the row's letters, standing on
+   * Where a place's crown rests by its row of the board: as tall as the row's letters, standing on
    * their baseline just left of the row, as a point in the scene a little in front of the camera
    * (so no scenery can hide it) with the matching scale, and fading with the board. Asked every
-   * frame: the camera moves (the swoop out of the title close-up). Null while the board is away.
+   * frame: the camera moves (the swoop out of the title close-up). Null while the row is away.
    */
-  function crownSpot(): CrownSpot | null {
-    const rest = hud.crownRest();
+  function crownSpot(place: CrownPlace): CrownSpot | null {
+    const rest = hud.crownRest(place);
     if (!rest) return null;
     const camera = rig.camera;
     camera.updateMatrixWorld();
@@ -305,7 +307,7 @@ function main(): void {
 
   /** What a ranked run saves for its replay: the player's look over the run and what came up at random. */
   function runLook(): RunLook {
-    return { ...(lookStart ?? lookState()), changes: lookChanges, hi: runHi, crown: runCrown, fx: runFx, clip: sfx.crashClip, line: hud.crashLine, move: entities.crashMove };
+    return { ...(lookStart ?? lookState()), changes: lookChanges, hi: runHi, crown: runCrown !== null, ...(runCrown && { place: runCrown }), fx: runFx, clip: sfx.crashClip, line: hud.crashLine, move: entities.crashMove };
   }
 
   /** A replay shows its player's look: settings, theme and camera. */
@@ -367,7 +369,8 @@ function main(): void {
     onView: (view) => {
       board = view;
       showBoard();
-      first = view.account === 'signedIn' && view.entries[0]?.me === true;
+      const rank = view.account === 'signedIn' ? view.entries.find((e) => e.me)?.rank : undefined;
+      place = CROWN_PLACES.find((p) => p === rank) ?? null;
       if (view.newBest && view.newBest !== celebratedBest) {
         celebratedBest = view.newBest;
         celebrate();
@@ -478,9 +481,9 @@ function main(): void {
     rig.celebrate();
     sfx.stopFunny();
     sfx.play('victory');
-    // The crown flies from the board onto the dancing T-Rex (once the board is up: an unranked best
+    // A crown flies from the board onto the dancing T-Rex (once the board is up: an unranked best
     // celebrates at the crash itself), and back when the next run starts.
-    if (!crownedNow) crownDue = true;
+    if (crowned === null) crownDue = true;
   }
 
   function togglePause(): void {
@@ -586,14 +589,15 @@ function main(): void {
           lookChanges = [];
           lookCameraStep = 0;
         }
-        // The crown, if it was on the T-Rex, flies to the board.
-        if (crownOn) {
+        // The crown, if it was on the T-Rex, flies to its place on the board.
+        if (crownOn !== null) {
+          const flown = crownOn;
           // The board stays a moment to catch it.
           hud.lingerBoard(1300);
-          entities.flyCrown('out', crownSpot);
-          crownOn = false;
+          entities.flyCrown('out', () => crownSpot(flown));
+          crownOn = null;
         }
-        crownedNow = false;
+        crowned = null;
         crownDue = false;
         // A HUD button left focused (say, the gear after closing settings) loses its ring once play starts.
         if (document.activeElement instanceof HTMLElement && hudRoot.contains(document.activeElement)) document.activeElement.blur();
@@ -679,15 +683,21 @@ function main(): void {
     Object.assign(shownPrev, prev).night = themedNight(look().dayNight ? prev.night : 0, darkBlend);
     Object.assign(shownCurr, curr).night = themedNight(look().dayNight ? curr.night : 0, darkBlend);
     models.setNight(shownCurr.night);
-    // The T-Rex wears the crown on the title screen if it is #1, and on a game-over screen it is
-    // celebrating on; otherwise the crown rests by the board.
+    // The T-Rex wears its place's crown on the title screen if it is in the top 3, and on a game-over
+    // screen it is celebrating on; otherwise the crowns rest by the board.
     // A replay shows its player's crown: on the T-Rex until the run starts (it then flies off to the board,
     // as above), and flown back in if they celebrated at the crash.
-    const wearing = replayId ? replay !== null && replay.left === replayRun?.steps && replayLook?.crown === true : first && curr.phase === 'title';
-    crownOn = wearing || (crownedNow && curr.phase === 'crashed');
+    const wearing = replayId
+      ? replay !== null && replay.left === replayRun?.steps && replayLook?.crown === true
+        ? (replayLook.place ?? 1)
+        : null
+      : curr.phase === 'title'
+        ? place
+        : null;
+    crownOn = wearing ?? (curr.phase === 'crashed' ? crowned : null);
     entities.setCrown(crownOn);
-    // The crown rests by the board's first place unless the leader's T-Rex is wearing it.
-    entities.setBoardCrown(crownOn ? null : crownSpot);
+    // Each crown rests by its place on the board unless the T-Rex is wearing it.
+    entities.setBoardCrown(crownSpot);
     world.update(shownPrev, shownCurr, alpha, dtMs);
     entities.update(shownPrev, shownCurr, alpha, dtMs);
     rig.update(shownCurr, entities.trex, dtMs);
@@ -707,12 +717,13 @@ function main(): void {
     hudCtx.mode = look().mode;
     hudCtx.resumeIn = resumeAt === null ? null : Math.max(1, Math.ceil((resumeAt - performance.now()) / RESUME_STEP_MS));
     hud.update(shownCurr, hudCtx);
-    if (crownDue && curr.phase === 'crashed' && hud.crownRest()) {
+    // The celebration's crown is the player's place's, or (outside the top 3, and in a replay) the gold one.
+    const party: CrownPlace = (!replayId && place) || 1;
+    if (crownDue && curr.phase === 'crashed' && hud.crownRest(party)) {
       crownDue = false;
-      crownedNow = true;
-      crownOn = true;
-      entities.setCrown(true);
-      entities.flyCrown('in', crownSpot);
+      crowned = crownOn = party;
+      entities.setCrown(party);
+      entities.flyCrown('in', () => crownSpot(party));
     }
     // Last, with the camera moved and the board laid out: the board's crown sits just in front of the camera.
     entities.placeCrowns(dtMs);

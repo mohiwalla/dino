@@ -5,7 +5,7 @@
 
 import './hud.css';
 import { PALETTE, REPO_URL, SCORE } from '../config';
-import type { BoardEntry, BoardView, CameraMode, GameEvent, GamePhase, GameSnapshot, Hud, HudContext, Settings, UiAction } from '../types';
+import { CROWN_PLACES, type BoardEntry, type BoardView, type CameraMode, type CrownPlace, type GameEvent, type GamePhase, type GameSnapshot, type Hud, type HudContext, type Settings, type UiAction } from '../types';
 import { createConfigPanel } from './config';
 import { createConfetti } from './confetti';
 import { createStarPrompt } from './star';
@@ -331,7 +331,7 @@ export function createHud(root: HTMLElement): Hud {
   /** The board's rows for the tab on show. */
   const shownRows = (view: BoardView | null): readonly BoardEntry[] => (period === 'week' ? (view?.week ?? []) : (view?.entries ?? []));
   const boardRows = el('div', 'hud-board-rows', boardBox);
-  // An invisible crown-sized spot left of first place, where the 3D crown rests (main.ts).
+  // An invisible crown-sized spot left of the rows: the 3D crowns rest there by the first three places (main.ts).
   const crownAnchor = add(boardRows, CROWN_ICON, 'hud-board-crown', 'small', isMenu);
   const rowCanvases: PixelCanvas[] = [];
   const boardNote = add(boardBox, layoutText(''), 'hud-board-note', 'small', isMenu);
@@ -769,21 +769,29 @@ export function createHud(root: HTMLElement): Hud {
     );
   }
 
-  /** Paused, the pause wash gets a hole over the crown resting by the board (see .hud-paused). */
-  let holed = false;
-  function placeCrownHole(isPaused: boolean): void {
-    const row = rowCanvases[0]?.el;
-    const rect = isPaused && row && !row.hidden ? row.getBoundingClientRect() : null;
-    if (!rect || rect.height === 0) {
-      if (holed) for (const v of ['--crown-x', '--crown-y', '--crown-r']) paused.style.removeProperty(v);
-      holed = false;
-      return;
-    }
+  /** The board row a place's crown rests by (on the tab on show), or null while it isn't there. */
+  function crownRow(place: CrownPlace): HTMLElement | null {
+    const i = shownRows(boardView).findIndex((e) => e.rank === place);
+    const row = i < 0 ? null : rowCanvases[i]?.el;
+    return row && !row.hidden ? row : null;
+  }
+
+  /** Paused, the pause wash gets a hole over each crown resting by the board (see .hud-paused). */
+  let holes = '';
+  function placeCrownHoles(isPaused: boolean): void {
     const spot = crownAnchor.el.getBoundingClientRect();
-    paused.style.setProperty('--crown-x', `${spot.right - rect.height * 0.85}px`);
-    paused.style.setProperty('--crown-y', `${rect.top + rect.height / 2}px`);
-    paused.style.setProperty('--crown-r', `${rect.height * 1.1}px`);
-    holed = true;
+    const next = !isPaused
+      ? ''
+      : CROWN_PLACES.flatMap((place) => {
+          const rect = crownRow(place)?.getBoundingClientRect();
+          if (!rect || rect.height === 0) return [];
+          const [x, y, r] = [spot.right - rect.height * 0.85, rect.top + rect.height / 2, rect.height * 1.1];
+          return [`radial-gradient(circle at ${x}px ${y}px, transparent ${r}px, #000 ${r * 1.6}px)`];
+        }).join(', ');
+    if (next === holes) return;
+    holes = next;
+    if (next) paused.style.setProperty('--hole', next);
+    else paused.style.removeProperty('--hole');
   }
 
   return {
@@ -796,9 +804,9 @@ export function createHud(root: HTMLElement): Hud {
       lingerTimer = window.setTimeout(() => delete hud.dataset.boardLinger, ms);
     },
 
-    crownRest() {
-      const row = rowCanvases[0]?.el;
-      if (!row || row.hidden || shownRows(boardView).length === 0) return null;
+    crownRest(place) {
+      const row = crownRow(place);
+      if (!row) return null;
       const spot = crownAnchor.el.getBoundingClientRect();
       const rect = row.getBoundingClientRect();
       if (rect.height === 0) return null;
@@ -839,7 +847,7 @@ export function createHud(root: HTMLElement): Hud {
       view.config = ctx.configOpen;
       view.star = ctx.starOpen;
       renderCanvases();
-      placeCrownHole(s.phase === 'paused');
+      placeCrownHoles(s.phase === 'paused');
     },
 
     handleEvents(events: GameEvent[]): void {

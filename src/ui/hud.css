@@ -111,7 +111,7 @@
   gap: calc(var(--hud-s) * 2);
 }
 
-/* Marks the spot left of first place where the 3D crown rests (it is drawn by the scene, not here). */
+/* Marks the spot left of the first three places where the 3D crowns rest (they are drawn by the scene, not here). */
 .hud .hud-board-crown {
   position: absolute;
   top: 0;
@@ -412,10 +412,13 @@
   justify-content: center;
   gap: calc(var(--hud-u) * 5);
   background: var(--hud-wash);
-  /* A soft hole where the crown rests by the board, so the wash doesn't dull it (hud.ts sets these). */
-  --hole: radial-gradient(circle at var(--crown-x, -999px) var(--crown-y, -999px), transparent var(--crown-r, 0px), #000 calc(var(--crown-r, 0px) * 1.6));
+  /* A soft hole where each crown rests by the board, so the wash doesn't dull them (hud.ts sets --hole, one
+     gradient per crown); the layers intersect, so every hole shows through. */
+  --hole: linear-gradient(#000, #000);
   -webkit-mask-image: var(--hole);
   mask-image: var(--hole);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
 }
 
 .hud-paused .hud-hint {
