@@ -17,6 +17,15 @@ import { mulberry32 } from './rng';
  */
 export const SIM_VERSION = 3;
 
+/**
+ * How a ranked run is uploaded while it is played (src/net/ranked.ts, worker/runs.ts). Since 2,
+ * every upload is numbered and says what it is. The server refuses runs from another protocol.
+ */
+export const RUN_PROTOCOL = 2;
+
+/** What an upload is: a periodic tick, the run pausing or resuming, or its finish. */
+export type UploadKind = 'tick' | 'pause' | 'resume' | 'finish';
+
 export interface RunSpec {
   /** Seeds the run's obstacle RNG (mulberry32). */
   seed: number;

@@ -188,6 +188,17 @@ describe('verification', () => {
     expect(checkTiming(paused(4), 4 * 300 + 300).review).toEqual(['paused 4 times']);
   });
 
+  test('paused time between a pause and its resume is not play', () => {
+    // LUo52HE9COokNPN2: paused 3 steps in, resumed 9 s later, then played on in real time.
+    const resumed = 1_000_000 + 9_000;
+    const end = resumed + 187 * SIM.STEP_MS;
+    expect(checkTiming([[1_000_000, 0], [1_000_300, 3, 'pause'], [resumed, 3, 'resume'], [end, 190, 'finish']], 190)).toMatchObject({ review: [], pauses: 1 });
+    // The same run before beats said what they were: the pause upload was never sent.
+    expect(checkTiming([[1_000_000, 0], [resumed, 3], [end, 190]], 190).review).toEqual([expect.stringContaining('slower than real time')]);
+    // With kinds, a tick that repeats the step count is time that passed without play, not a pause.
+    expect(checkTiming([[1_000_000, 0], [resumed, 3, 'tick'], [end, 190, 'finish']], 190)).toMatchObject({ pauses: 0, review: [expect.stringContaining('slower than real time')] });
+  });
+
   test('a beat log that does not end on the run is rejected', () => {
     expect(checkTiming([[0, 0]], 10).rejected).not.toEqual([]);
     expect(checkTiming([[0, 0], [1000, 50]], 60).rejected).not.toEqual([]);
