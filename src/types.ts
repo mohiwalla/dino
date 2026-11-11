@@ -210,8 +210,10 @@ export interface RunLook extends LookState {
   changes: [number, Partial<LookState>][];
   /** The high score on screen as the run started. */
   hi: number;
-  /** The T-Rex wore the crown (its player was #1) as the run started; it flew off to the board. */
+  /** The T-Rex wore a crown (its player was in the top 3) as the run started; it flew off to the board. */
   crown: boolean;
+  /** Which one: the player's place (1 gold, 2 silver, 3 bronze). Missing on runs from before silver and bronze: gold. */
+  place?: CrownPlace;
   /** Seeds the fart sounds' order and pitch for the run. */
   fx: number;
   /** The crash clip's URL; empty when the crash sound was synthesised. */
@@ -312,7 +314,11 @@ export interface World {
 // Factory: src/render/world.ts  export function createWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer): World
 
 /** The T-Rex, the obstacle pool, and small effects (dust, landing puffs, crash). */
-/** Where the board's crown rests: a point in the scene, and the scale that makes it the right size on screen. */
+/** A place on the team board with a crown: 1 gold, 2 silver, 3 bronze. */
+export type CrownPlace = 1 | 2 | 3;
+export const CROWN_PLACES: readonly CrownPlace[] = [1, 2, 3];
+
+/** Where a board's crown rests: a point in the scene, and the scale that makes it the right size on screen. */
 export interface CrownSpot {
   point: THREE.Vector3;
   scale: number;
@@ -335,13 +341,13 @@ export interface Entities {
   setCrashMove(move: string | null): void;
   /** The last funny crash's move. */
   readonly crashMove: string;
-  /** The player is #1 on the team board: the T-Rex wears a crown. */
-  setCrown(on: boolean): void;
-  /** Fly the crown from the head to its resting place by the board, or from there onto the head. */
+  /** The player is in the top 3 of the team board: the T-Rex wears that place's crown (null: none). */
+  setCrown(place: CrownPlace | null): void;
+  /** Fly the crown it wears from the head to its resting place by the board, or from there onto the head. */
   flyCrown(direction: 'out' | 'in', board: () => CrownSpot | null): void;
-  /** The crown's resting place by the board's first place (asked every frame), or null while the board is away. */
-  setBoardCrown(spot: (() => CrownSpot | null) | null): void;
-  /** Place the crowns for this frame. Call after the camera has moved: the board's one sits just in front of it. */
+  /** Each place's crown's resting place by its row of the board (asked every frame), null while that row or the board is away. */
+  setBoardCrown(spot: ((place: CrownPlace) => CrownSpot | null) | null): void;
+  /** Place the crowns for this frame. Call after the camera has moved: the board's ones sit just in front of it. */
   placeCrowns(dtMs: number): void;
   /** Fart clouds on jumps. Cosmetic only. */
   setFarts(on: boolean): void;
@@ -465,8 +471,8 @@ export interface Hud {
   setBoard(view: BoardView): void;
   /** Keep the board on screen for `ms` after a run starts (fading out at the end), for the crown to fly back into. */
   lingerBoard(ms: number): void;
-  /** Where the crown rests by the board's first place on screen (CSS px: the right edge of its spot, the letters' baseline and height) and the board's opacity, or null while the board isn't shown. */
-  crownRest(): { right: number; baseline: number; height: number; opacity: number } | null;
+  /** Where a place's crown rests by its row of the board on screen (CSS px: the right edge of its spot, the letters' baseline and height) and the board's opacity, or null while that row isn't shown. */
+  crownRest(place: CrownPlace): { right: number; baseline: number; height: number; opacity: number } | null;
   /** Confetti over the game, for a rank up or a new best. */
   celebrate(): void;
   /** A replay: funny game overs show this line instead of a random one (null: random again). */

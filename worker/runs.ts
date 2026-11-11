@@ -132,6 +132,7 @@ function cleanLook(look: unknown, steps: number): string | null {
     changes,
     hi: Number.isInteger(l.hi) && (l.hi as number) >= 0 ? l.hi : 0,
     crown: l.crown === true,
+    place: l.place === 2 || l.place === 3 ? l.place : 1,
     fx: Number.isInteger(l.fx) ? (l.fx as number) >>> 0 : 0,
     clip: clipPath(l.clip),
     line: text(l.line, 60),

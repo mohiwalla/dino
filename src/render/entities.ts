@@ -111,8 +111,8 @@ export function createEntities(scene: THREE.Scene, models: ModelLibrary): Entiti
       farts = on;
     },
 
-    setCrown(on) {
-      trex.setCrown(on);
+    setCrown(place) {
+      trex.setCrown(place);
     },
 
     flyCrown(direction, board) {

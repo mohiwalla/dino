@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { RUNNER, TREX } from '../config';
 import { createShuffleBag } from '../shuffle';
 import { TREX_SPRITES } from './sprites';
-import type { CrownSpot, GameSnapshot, ModelLibrary, TrexFrame } from '../types';
+import { CROWN_PLACES, type CrownPlace, type CrownSpot, type GameSnapshot, type ModelLibrary, type TrexFrame } from '../types';
 
 /** Squash & stretch limit, as a fraction of the model's height. */
 const MAX_SQUASH = 0.08;
@@ -124,14 +124,19 @@ function dance(t: number): { lift: number; sway: number; twirl: number } {
 }
 
 /**
- * The #1 player's crown, after a classic royal crown: a thick base rim, a band, then a wall
+ * The top 3 players' crowns, after a classic royal crown: a thick base rim, a band, then a wall
  * flaring out into alternating tall and short points, each tipped with a ball. Low-poly and
  * flat-faceted, to sit with the voxel world without being made of voxels itself. The band and wall
- * have real thickness, and the gold is a polished metal reflecting a small built-in studio
+ * have real thickness, and the metal is polished, reflecting a small built-in studio
  * environment, so it shines as it turns. It hovers just over the head and rides
  * the head's pose (tipping over with it in a crash). Sizes in px.
  */
-const CROWN_GOLD = '#ffc24d';
+/** Each place's metal (gold, silver, bronze): its colour, the tint of the studio it reflects, and its glow's colours (centre, middle, edge). */
+const CROWN_METALS: Record<CrownPlace, { color: string; studio: readonly [number, number, number]; glow: readonly [string, string, string] }> = {
+  1: { color: '#ffc24d', studio: [1, 0.96, 0.88], glow: ['rgba(255, 220, 120, 1)', 'rgba(255, 190, 60, 0.45)', 'rgba(255, 170, 30, 0)'] },
+  2: { color: '#dfe4ec', studio: [0.94, 0.97, 1], glow: ['rgba(235, 242, 255, 1)', 'rgba(200, 214, 240, 0.42)', 'rgba(180, 196, 230, 0)'] },
+  3: { color: '#d98b4e', studio: [1, 0.9, 0.78], glow: ['rgba(255, 200, 150, 1)', 'rgba(230, 140, 80, 0.45)', 'rgba(205, 110, 50, 0)'] },
+};
 const CROWN_RADIUS = 7;
 /** Thickness of the band and the pointed wall. */
 const CROWN_THICK = 0.85;
@@ -229,10 +234,12 @@ function crownWall(): { faces: THREE.BufferGeometry; edge: THREE.BufferGeometry;
 }
 
 /**
- * A tiny equirectangular studio for the gold to reflect: warm light above, a dark floor, and a
- * few bright soft boxes around the horizon, which become the travelling highlights as it turns.
+ * A tiny equirectangular studio for the metal to reflect: light above (tinted to suit the metal), a
+ * dark floor, and a few bright soft boxes around the horizon, which become the travelling
+ * highlights as it turns.
  */
-function crownStudio(): THREE.DataTexture {
+function crownStudio(place: CrownPlace): THREE.DataTexture {
+  const [tr, tg, tb] = CROWN_METALS[place].studio;
   const W = 128;
   const H = 64;
   const data = new Uint8Array(W * H * 4);
@@ -255,9 +262,9 @@ function crownStudio(): THREE.DataTexture {
       }
       const i = (y * W + x) * 4;
       const c = Math.min(255, Math.round(255 * l));
-      data[i] = c;
-      data[i + 1] = Math.round(c * 0.96);
-      data[i + 2] = Math.round(c * 0.88);
+      data[i] = Math.round(c * tr);
+      data[i + 1] = Math.round(c * tg);
+      data[i + 2] = Math.round(c * tb);
       data[i + 3] = 255;
     }
   const texture = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
@@ -271,36 +278,37 @@ function crownStudio(): THREE.DataTexture {
 
 /**
  * The crown by day: it reflects a dark studio, which reads too dim against the light scene, so in
- * daylight it gets a warm gold lift and brighter reflections, easing back at night.
+ * daylight it gets a lift in its own colour and brighter reflections, easing back at night.
  */
 const CROWN_DAY_LIFT = 0.25;
 const CROWN_DAY_SHINE = 0.3;
 
-/** Brighten a crown's gold for daylight: `night` 0 is full day, 1 full night. */
+/** Brighten a crown's metal for daylight: `night` 0 is full day, 1 full night. */
 function lightCrown(crown: THREE.Group, night: number): void {
   const day = 1 - THREE.MathUtils.clamp(night, 0, 1);
   for (const m of crown.userData.metals as THREE.MeshStandardMaterial[]) {
     m.userData.env ??= m.envMapIntensity;
     m.envMapIntensity = m.userData.env * (1 + CROWN_DAY_SHINE * day);
-    m.emissive.set(CROWN_GOLD);
+    m.emissive.set(m.color);
     m.emissiveIntensity = CROWN_DAY_LIFT * day;
   }
 }
 
-/** The crown's shine: a soft gold glow behind it that breathes, drawn additively so it lights what is behind. */
+/** The crown's shine: a soft glow in its metal's colour behind it that breathes, drawn additively so it lights what is behind. */
 const GLOW_SIZE = 30;
 const GLOW_OPACITY = 0.42;
 
-function createGlow(): THREE.Sprite {
+function createGlow(place: CrownPlace): THREE.Sprite {
+  const [centre, middle, edge] = CROWN_METALS[place].glow;
   const size = 64;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const g = canvas.getContext('2d')!;
   const c = size / 2;
   const grad = g.createRadialGradient(c, c, 0, c, c, c);
-  grad.addColorStop(0, 'rgba(255, 220, 120, 1)');
-  grad.addColorStop(0.35, 'rgba(255, 190, 60, 0.45)');
-  grad.addColorStop(1, 'rgba(255, 170, 30, 0)');
+  grad.addColorStop(0, centre);
+  grad.addColorStop(0.35, middle);
+  grad.addColorStop(1, edge);
   g.fillStyle = grad;
   g.fillRect(0, 0, size, size);
   const map = new THREE.CanvasTexture(canvas);
@@ -312,12 +320,13 @@ function createGlow(): THREE.Sprite {
   return glow;
 }
 
-function createCrown(): THREE.Group {
+function createCrown(place: CrownPlace): THREE.Group {
   const crown = new THREE.Group();
-  crown.name = 'crown';
-  const studio = crownStudio();
-  const gold = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.08, envMap: studio, envMapIntensity: 2.6, flatShading: true });
-  const inside = new THREE.MeshStandardMaterial({ color: CROWN_GOLD, metalness: 1, roughness: 0.45, envMap: studio, envMapIntensity: 0.45, flatShading: true });
+  crown.name = `crown-${place}`;
+  const studio = crownStudio(place);
+  const { color } = CROWN_METALS[place];
+  const metal = new THREE.MeshStandardMaterial({ color, metalness: 1, roughness: 0.08, envMap: studio, envMapIntensity: 2.6, flatShading: true });
+  const inside = new THREE.MeshStandardMaterial({ color, metalness: 1, roughness: 0.45, envMap: studio, envMapIntensity: 0.45, flatShading: true });
   const add = (geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0): void => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
@@ -325,22 +334,22 @@ function createCrown(): THREE.Group {
     mesh.receiveShadow = true;
     crown.add(mesh);
   };
-  const ring = (radius: number, tube: number, y: number): void => add(new THREE.TorusGeometry(radius, tube, 5, CROWN_SEGMENTS).rotateX(Math.PI / 2), gold, 0, y);
+  const ring = (radius: number, tube: number, y: number): void => add(new THREE.TorusGeometry(radius, tube, 5, CROWN_SEGMENTS).rotateX(Math.PI / 2), metal, 0, y);
   // The band: a thick tube (outside bright, inside dimmer) on a fat rim.
-  add(new THREE.CylinderGeometry(CROWN_RADIUS, CROWN_RADIUS, CROWN_BAND, CROWN_SEGMENTS, 1, true).translate(0, CROWN_BAND / 2, 0), gold);
+  add(new THREE.CylinderGeometry(CROWN_RADIUS, CROWN_RADIUS, CROWN_BAND, CROWN_SEGMENTS, 1, true).translate(0, CROWN_BAND / 2, 0), metal);
   add(new THREE.CylinderGeometry(CROWN_RADIUS - CROWN_THICK, CROWN_RADIUS - CROWN_THICK, CROWN_BAND, CROWN_SEGMENTS, 1, true).translate(0, CROWN_BAND / 2, 0), inside);
   ring(CROWN_RADIUS - CROWN_THICK / 2, 1.05, 0.2);
   const wall = crownWall();
-  add(wall.faces, gold);
-  add(wall.edge, gold);
+  add(wall.faces, metal);
+  add(wall.edge, metal);
   wall.tips.forEach((tip, i) => {
     const r = i % 2 === 0 ? 1.15 : 0.95;
-    add(new THREE.IcosahedronGeometry(r, 0), gold, tip.x, tip.y + r * 0.8, tip.z);
+    add(new THREE.IcosahedronGeometry(r, 0), metal, tip.x, tip.y + r * 0.8, tip.z);
   });
-  const glow = createGlow();
+  const glow = createGlow(place);
   crown.add(glow);
   crown.userData.glow = glow;
-  crown.userData.metals = [gold, inside];
+  crown.userData.metals = [metal, inside];
   return crown;
 }
 
@@ -388,14 +397,14 @@ export interface TrexView {
   /** A rank up or a new best on the game-over screen: stand up and hop for joy until restart. */
   celebrate(): void;
   setFunny(on: boolean): void;
-  /** The player is #1 on the team board: wear the crown. */
-  setCrown(on: boolean): void;
-  /** Place the crowns for this frame; after the camera has moved, since the board's one sits by the camera. */
+  /** The player is in the top 3 of the team board: wear that place's crown (null: none). */
+  setCrown(place: CrownPlace | null): void;
+  /** Place the crowns for this frame; after the camera has moved, since the board's ones sit by the camera. */
   placeCrowns(dtMs: number): void;
-  /** Fly the crown from the head to its resting place by the board, or from there onto the head. */
+  /** Fly the crown it wears from the head to its resting place by the board, or from there onto the head. */
   flyCrown(direction: 'out' | 'in', board: () => CrownSpot | null): void;
-  /** The crown's resting place by the board's first place (asked every frame), or null while the board is away. */
-  setBoardCrown(spot: (() => CrownSpot | null) | null): void;
+  /** Each place's crown's resting place by its row of the board (asked every frame), null while that row or the board is away. */
+  setBoardCrown(spot: ((place: CrownPlace) => CrownSpot | null) | null): void;
   dispose(): void;
 }
 
@@ -410,9 +419,15 @@ export function createTrexView(models: ModelLibrary): TrexView {
   pivot.add(mesh);
   root.add(pivot);
   // On the mesh, so it rides every squash, tilt, spin and dance; placed over the head each frame.
-  const crown = createCrown();
-  crown.visible = false;
-  mesh.add(crown);
+  // One per place; `crown` is the one worn (or last worn), the others stay hidden.
+  const worn = {} as Record<CrownPlace, THREE.Group>;
+  for (const p of CROWN_PLACES) {
+    worn[p] = createCrown(p);
+    worn[p].visible = false;
+    mesh.add(worn[p]);
+  }
+  let place: CrownPlace = 1;
+  let crown = worn[place];
   let head = headTop(frame);
   /** The crown's lag behind its spot over the head (px), and where that spot was last frame. */
   const lagX: Spring = { x: 0, v: 0 };
@@ -426,17 +441,21 @@ export function createTrexView(models: ModelLibrary): TrexView {
   /** A flight to or from the board, or null. */
   let flight: { direction: 'out' | 'in'; t: number; board: () => CrownSpot | null; from: THREE.Vector3; last: CrownSpot | null } | null = null;
   const flyPoint = new THREE.Vector3();
-  // The same crown resting by the board's first place: in the root, so it stays upright. Its
-  // materials can fade, since it fades with the board.
-  const restCrown = createCrown();
-  restCrown.visible = false;
-  root.add(restCrown);
-  const restMaterials = new Set<THREE.Material>();
-  restCrown.traverse((o) => {
-    if (o instanceof THREE.Mesh) restMaterials.add(o.material as THREE.Material);
-  });
-  for (const m of restMaterials) m.transparent = true;
-  let restSpot: (() => CrownSpot | null) | null = null;
+  // The same crowns resting by the board's first three places: in the root, so they stay upright.
+  // Their materials can fade, since they fade with the board.
+  const rest = {} as Record<CrownPlace, { crown: THREE.Group; materials: Set<THREE.Material> }>;
+  for (const p of CROWN_PLACES) {
+    const c = createCrown(p);
+    c.visible = false;
+    root.add(c);
+    const materials = new Set<THREE.Material>();
+    c.traverse((o) => {
+      if (o instanceof THREE.Mesh) materials.add(o.material as THREE.Material);
+    });
+    for (const m of materials) m.transparent = true;
+    rest[p] = { crown: c, materials };
+  }
+  let restSpot: ((place: CrownPlace) => CrownSpot | null) | null = null;
 
   const squash: Spring = { x: 0, v: 0 };
   const tilt: Spring = { x: 0, v: 0 };
@@ -497,23 +516,29 @@ export function createTrexView(models: ModelLibrary): TrexView {
     return true;
   }
 
-  /** The resting crown by the board: there whenever the board is (and no flight is carrying it), fading with it. */
-  function placeRestCrown(t: number): void {
-    const spot = flight ? null : (restSpot?.() ?? null);
-    restCrown.visible = spot !== null && spot.opacity > 0;
-    if (!spot || !restCrown.visible) return;
-    root.updateWorldMatrix(true, false);
-    restCrown.position.copy(root.worldToLocal(flyPoint.copy(spot.point)));
-    restCrown.scale.setScalar(spot.scale);
-    restCrown.rotation.y = t * CROWN_TURN_PER_S;
-    for (const m of restMaterials) m.opacity = spot.opacity;
-    ((restCrown.userData.glow as THREE.Sprite).material as THREE.SpriteMaterial).opacity = GLOW_OPACITY * spot.opacity * (0.8 + 0.2 * Math.sin(t * 2.6));
+  /**
+   * The resting crowns by the board: each there whenever its row is (unless the T-Rex wears it or a
+   * flight is carrying it), fading with the board.
+   */
+  function placeRestCrowns(t: number): void {
+    for (const p of CROWN_PLACES) {
+      const { crown: c, materials } = rest[p];
+      const spot = p === place && (flight || wantCrown) ? null : (restSpot?.(p) ?? null);
+      c.visible = spot !== null && spot.opacity > 0;
+      if (!spot || !c.visible) continue;
+      root.updateWorldMatrix(true, false);
+      c.position.copy(root.worldToLocal(flyPoint.copy(spot.point)));
+      c.scale.setScalar(spot.scale);
+      c.rotation.y = t * CROWN_TURN_PER_S;
+      for (const m of materials) m.opacity = spot.opacity;
+      ((c.userData.glow as THREE.Sprite).material as THREE.SpriteMaterial).opacity = GLOW_OPACITY * spot.opacity * (0.8 + 0.2 * Math.sin(t * 2.6));
+    }
   }
 
   /** Hover the crown just over the head, lagging its moves on a spring, bobbing and turning on the wall clock. */
   function placeCrown(dt: number, fresh: boolean): void {
     const now = performance.now() / 1000;
-    placeRestCrown(now);
+    placeRestCrowns(now);
     if (flyCrown(dt, now)) return;
     shown = THREE.MathUtils.clamp(shown + (wantCrown ? 1 : -1) * (dt / CROWN_FADE_SECONDS), 0, 1);
     crown.visible = shown > 0;
@@ -581,8 +606,10 @@ export function createTrexView(models: ModelLibrary): TrexView {
     root,
 
     update(prev, curr, alpha, dtMs, fresh) {
-      lightCrown(crown, curr.night);
-      lightCrown(restCrown, curr.night);
+      for (const p of CROWN_PLACES) {
+        lightCrown(worn[p], curr.night);
+        lightCrown(rest[p].crown, curr.night);
+      }
       const a = fresh ? 1 : alpha;
       const t0 = prev.trex;
       const t1 = curr.trex;
@@ -678,8 +705,18 @@ export function createTrexView(models: ModelLibrary): TrexView {
       funny = on;
     },
 
-    setCrown(on) {
-      wantCrown = on;
+    setCrown(next) {
+      wantCrown = next !== null;
+      if (next === null || next === place) return;
+      // Another place's crown: it takes over where the last one is, mid-fade or mid-flight.
+      const was = crown;
+      place = next;
+      crown = worn[next];
+      crown.position.copy(was.position);
+      crown.scale.copy(was.scale);
+      crown.rotation.copy(was.rotation);
+      crown.visible = was.visible;
+      was.visible = false;
     },
 
     flyCrown(direction, board) {
