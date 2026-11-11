@@ -4,12 +4,15 @@
 
 import { SIM } from '../src/config';
 import { autopilot } from '../src/sim/autopilot';
-import { checkInputs, replayRun, type RunSpec } from '../src/sim/replay';
+import { checkInputs, replayRun, type RunSpec, type UploadKind } from '../src/sim/replay';
 import { STEPS } from '../src/sim/steps';
 import type { GameSim } from '../src/types';
 
-/** [server ms, steps recorded by then]. The first beat is the run's start, [startedAt, 0]. */
-export type Beat = readonly [number, number];
+/**
+ * [server ms, steps recorded by then, what the upload was]. The first beat is the run's start,
+ * [startedAt, 0]. Runs from before uploads said what they were have no kinds.
+ */
+export type Beat = readonly [number, number] | readonly [number, number, UploadKind];
 
 export interface RunRecord extends RunSpec {
   /** The game speed multiplier it was played at: steps came that much faster in real time. */
@@ -73,10 +76,11 @@ export const SAME_HOLD: Sameness = { label: (n, of) => `${n} of ${of} jump holds
 export const SAME_DROP: Sameness = { label: (n, of) => `${n} of ${of} mid-air ducks the same length`, limit: 0.7, near: 0.5 };
 
 /**
- * Checks the beats the browser sent during the run against the steps it claimed at each.
- * Pauses show up as beats where no steps passed (the browser beats on pause and on resume);
- * the clock is only compared over stretches of play between them. At a speed `multiplier` each
- * step takes that much less real time.
+ * Checks the beats the browser sent during the run against the steps it claimed at each. The
+ * clock is only compared over stretches of play: from the start or a resume, to each beat after
+ * it. Pauses are the 'pause' beats (each followed by its 'resume'); in runs from before beats had
+ * kinds, two beats in a row at the same step. At a speed `multiplier` each step takes that much
+ * less real time.
  */
 export function checkTiming(
   beats: readonly Beat[],
@@ -95,19 +99,25 @@ export function checkTiming(
   let worstSlowMs = 0;
   let lagMs = 0;
   for (let k = 1; k < beats.length; k++) {
-    const [t, s] = beats[k];
+    const [t, s, kind] = beats[k];
     const [tPrev, sPrev] = beats[k - 1];
     if (s < sPrev || t < tPrev) {
       rejected.push('beats out of order');
       break;
     }
-    if (s === sPrev) {
+    // Paused time doesn't count: play picks up again from the resume.
+    if (kind === 'resume') {
+      anchor = beats[k];
+      continue;
+    }
+    if (kind === undefined && s === sPrev) {
       if (!inPause) pauses++;
       inPause = true;
       anchor = beats[k];
       continue;
     }
     inPause = false;
+    if (kind === 'pause') pauses++;
     const played = ((s - anchor[1]) * SIM.STEP_MS) / multiplier;
     const elapsed = t - anchor[0];
     if (played > elapsed + FAST_SLACK_MS) {

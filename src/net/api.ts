@@ -1,6 +1,7 @@
 // The leaderboard server's HTTP API (worker/), same origin as the game.
 
 import type { RunLook } from '../types';
+import type { Upload } from './outbox';
 
 export interface Account {
   name: string;
@@ -68,12 +69,16 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(path: string, body?: unknown): Promise<T> {
+/** A run upload that hasn't answered in this long is given up on (and sent again). */
+const UPLOAD_TIMEOUT_MS = 8000;
+
+async function call<T>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
   const res = await fetch(`/api/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   // A static host without the server answers /api/* with the game's HTML (or a 404 page).
   if (!(res.headers.get('content-type') ?? '').includes('application/json')) throw new ApiError(0, 'no leaderboard server');
@@ -85,9 +90,11 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: () => call<{ user: Account | null }>('me').then((r) => r.user),
   leaderboard: () => call<BoardData>('leaderboard'),
-  startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number }) => call<{ id: string; seed: number }>('runs', body),
-  beat: (id: string, body: { steps: number; inputs: number[] }) => call<{ ok: true }>(`runs/${id}/beat`, body),
-  finish: (id: string, body: { steps: number; inputs: number[]; look: RunLook }) => call<FinishResult>(`runs/${id}/finish`, body),
+  startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number; protocol: number }) => call<{ id: string; seed: number }>('runs', body),
+  /** A tick, pause or resume: {seq, kind, steps, inputs}. */
+  beat: (id: string, upload: Upload) => call<{ ok: true }>(`runs/${id}/beat`, upload, UPLOAD_TIMEOUT_MS),
+  /** The finish: {seq, kind: 'finish', steps, inputs, look}. */
+  finish: (id: string, upload: Upload) => call<FinishResult>(`runs/${id}/finish`, upload, UPLOAD_TIMEOUT_MS),
   run: (id: string) => call<StoredRun>(`runs/${encodeURIComponent(id)}`),
   logout: () => call<{ ok: true }>('auth/logout', {}),
   deleteRuns: () => call<{ ok: true }>('runs/delete', {}),
