@@ -24,6 +24,8 @@ interface OpenRun {
   after_crash: number;
   fast: number;
   multiplier: number;
+  /** The SIM_VERSION it started under: a deploy mid-run must not change how it replays. */
+  sim_version: number;
   started_at: number;
   steps: number;
   inputs: string;
@@ -64,7 +66,7 @@ export async function startRun(request: Request, env: Env): Promise<Response> {
 
 async function openRun(env: Env, user: User, id: string): Promise<OpenRun> {
   const run = await env.DB.prepare(
-    "SELECT id, user_id, seed, mobile, after_crash, fast, multiplier, started_at, steps, inputs, beats FROM runs WHERE id = ? AND status = 'open'",
+    "SELECT id, user_id, seed, mobile, after_crash, fast, multiplier, sim_version, started_at, steps, inputs, beats FROM runs WHERE id = ? AND status = 'open'",
   )
     .bind(id)
     .first<OpenRun>();
@@ -167,6 +169,7 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
     afterCrash: run.after_crash === 1,
     fast: run.fast === 1,
     multiplier: run.multiplier,
+    simVersion: run.sim_version,
     steps: next.steps,
     inputs: next.inputs,
     beats: next.beats,
