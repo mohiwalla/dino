@@ -90,16 +90,39 @@ async function requireAdmin(request: Request, env: Env): Promise<User> {
   return user;
 }
 
-/** GET /api/admin/runs?status=review|ok|rejected|void|all */
+/** Runs per page of the admin lists. */
+export const ADMIN_PAGE_SIZE = 50;
+
+/**
+ * GET /api/admin/runs?status=review|ok|rejected|void|all&page=1&q= -> {runs, total, page, pageSize}:
+ * finished runs newest first, a page at a time; `q` keeps players whose name or email contains it.
+ */
 export async function adminRuns(request: Request, env: Env, url: URL): Promise<Response> {
   await requireAdmin(request, env);
   const status = url.searchParams.get('status') ?? 'review';
-  const where = status === 'all' ? "r.status NOT IN ('open', 'abandoned')" : 'r.status = ?';
-  const query = env.DB.prepare(
-    `SELECT r.id, u.name, u.email, r.score, r.status, r.verdict, r.hidden, r.flags, r.mobile, r.fast, r.multiplier, r.steps, r.started_at, r.finished_at
-     FROM runs r JOIN users u ON u.id = r.user_id WHERE ${where} ORDER BY r.finished_at DESC LIMIT 200`,
-  );
-  return json({ runs: (await (status === 'all' ? query : query.bind(status)).all()).results });
+  const page = Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1));
+  const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+  const where = [status === 'all' ? "r.status NOT IN ('open', 'abandoned')" : 'r.status = ?'];
+  const binds: unknown[] = status === 'all' ? [] : [status];
+  if (q) {
+    // LIKE's own wildcards in the search are taken literally.
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push("(LOWER(u.name) LIKE ? ESCAPE '\\' OR LOWER(u.email) LIKE ? ESCAPE '\\')");
+    binds.push(like, like);
+  }
+  const from = `FROM runs r JOIN users u ON u.id = r.user_id WHERE ${where.join(' AND ')}`;
+  const [rows, count] = await Promise.all([
+    env.DB.prepare(
+      `SELECT r.id, u.name, u.email, r.score, r.status, r.verdict, r.hidden, r.flags, r.mobile, r.fast, r.multiplier, r.steps, r.started_at, r.finished_at
+       ${from} ORDER BY r.finished_at DESC, r.id LIMIT ? OFFSET ?`,
+    )
+      .bind(...binds, ADMIN_PAGE_SIZE, (page - 1) * ADMIN_PAGE_SIZE)
+      .all(),
+    env.DB.prepare(`SELECT COUNT(*) AS n ${from}`)
+      .bind(...binds)
+      .first<{ n: number }>(),
+  ]);
+  return json({ runs: rows.results, total: count?.n ?? 0, page, pageSize: ADMIN_PAGE_SIZE });
 }
 
 /** POST /api/admin/runs/:id {status: 'ok' | 'void'}, noted in run_reviews. */

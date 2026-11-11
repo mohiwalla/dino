@@ -316,13 +316,14 @@ async function bestScore(env: Env, userId: string): Promise<number | null> {
 
 /**
  * GET /api/runs/mine -> {runs: [{id, score, status, mobile, fast, multiplier, steps, finishedAt}], weekStart}:
- * the player's own finished runs, newest first (the last 500). Why a run was flagged stays admin-only.
+ * the player's own finished runs, newest first: the last 10,000, since the page works its stats out
+ * from them (it shows them a page at a time). Why a run was flagged stays admin-only.
  */
 export async function myRuns(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const rows = await env.DB.prepare(
     `SELECT id, score, status, mobile, fast, multiplier, steps, finished_at FROM runs
-     WHERE user_id = ? AND status NOT IN ('open', 'abandoned') AND hidden = 0 ORDER BY finished_at DESC LIMIT 500`,
+     WHERE user_id = ? AND status NOT IN ('open', 'abandoned') AND hidden = 0 ORDER BY finished_at DESC LIMIT 10000`,
   )
     .bind(user.id)
     .all<{ id: string; score: number | null; status: string; mobile: number; fast: number; multiplier: number; steps: number; finished_at: number }>();

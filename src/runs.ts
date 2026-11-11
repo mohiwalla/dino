@@ -3,9 +3,12 @@
 
 import { revealPage } from './curtain';
 import { api, type BoardData } from './net/api';
-import { bestTag, call, duration, empty, h, heading, loading, pill, px, signIn, speed, stats, table, tabs, time, toast, topBar, watchLink } from './pages';
+import { bestTag, call, duration, empty, h, heading, loading, pager, pill, px, signIn, speed, stats, table, tabs, time, toast, topBar, watchLink } from './pages';
 
 type Period = 'all' | 'week';
+
+/** Runs per page; the stats above the list still count every run. */
+const PAGE_SIZE = 50;
 
 interface MyRun {
   id: string;
@@ -20,6 +23,7 @@ interface MyRun {
 
 const root = document.getElementById('runs') as HTMLElement;
 let period: Period = 'all';
+let page = 1;
 let runs: MyRun[] = [];
 let weekStart = 0;
 let board: BoardData | null = null;
@@ -54,6 +58,7 @@ function draw(): void {
       period,
       (p) => {
         period = p;
+        page = 1;
         draw();
       },
     ),
@@ -65,7 +70,7 @@ function draw(): void {
   list.replaceChildren(
     table(
       [{ label: 'SCORE', className: 'num' }, { label: 'STATUS' }, { label: 'SPEED' }, { label: 'LENGTH' }, { label: 'FINISHED' }, { label: '', className: 'actions' }],
-      shown.map((r) => [
+      shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => [
         h('span', { className: 'cell' }, ...(r === best ? [bestTag()] : []), px(r.score === null ? '-' : String(r.score), 3)),
         pill(r.status),
         `${speed(r)}${r.mobile ? ' 📱' : ''}`,
@@ -74,6 +79,11 @@ function draw(): void {
         watchLink(r.id),
       ]),
     ),
+    pager(page, PAGE_SIZE, shown.length, (p) => {
+      page = p;
+      draw();
+      list.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }),
   );
 }
 
