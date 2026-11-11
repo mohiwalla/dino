@@ -3,19 +3,21 @@
 //
 // Every run asks the server for an obstacle seed the moment it starts. The seed has to arrive
 // before the first obstacle spawns (STEPS.CLEAR, 1.2 s in); a run that started without one just
-// isn't ranked. While a ranked run is going the browser "beats" every BEAT_MS, and on pause
-// and resume, so the server can hold the step count against its own clock (worker/verify.ts).
+// isn't ranked. While a ranked run is going the browser uploads a tick every BEAT_MS, and one on
+// each pause and resume, so the server can hold the step count against its own clock
+// (worker/verify.ts). Uploads go out in order through an outbox (./outbox.ts), which keeps a
+// pause made before the seed arrived and retries uploads that didn't get through.
 
 import { STORAGE_KEYS } from '../config';
 import { mulberry32 } from '../sim/rng';
-import { createInputRecorder, SIM_VERSION, type InputRecorder } from '../sim/replay';
+import { createInputRecorder, RUN_PROTOCOL, SIM_VERSION, type InputRecorder, type UploadKind } from '../sim/replay';
 import { STEPS } from '../sim/steps';
 import type { BoardEntry, BoardView, GameEvent, GameSim, InputFrame, RunLook } from '../types';
-import { api, ApiError, type Account, type BoardData, type BoardList, type FinishResult } from './api';
+import { api, ApiError, type Account, type BoardData, type BoardList } from './api';
+import { createOutbox, type Outbox } from './outbox';
 
 const BEAT_MS = 10_000;
 const BOARD_ROWS = 10;
-const FINISH_TRIES = 3;
 /** ?stale: this tab claims the previous game version, to see what a tab left open over an update gets. */
 const STALE = new URLSearchParams(location.search).has('stale');
 /** ?winners: show last week's winners banner now (with this board's top 3 if last week had none). */
@@ -58,10 +60,9 @@ interface Run {
   afterCrash: boolean;
   state: 'starting' | 'ranked' | 'unranked' | 'finished';
   id: string | null;
-  /** Inputs taken from the recorder but not yet accepted by the server. */
-  unsent: number[];
-  sending: Promise<void> | null;
-  beatAgain: boolean;
+  outbox: Outbox;
+  /** Paused (ticks wait for the resume). */
+  paused: boolean;
   timer: number;
 }
 
@@ -85,10 +86,6 @@ function writeCache(value: Cached): void {
   } catch {
     // Storage disabled: the board just loads from the server each time.
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createRanked(opts: RankedOptions): Ranked {
@@ -166,58 +163,25 @@ export function createRanked(opts: RankedOptions): Ranked {
     if (r.state === 'finished') return;
     r.state = 'unranked';
     clearInterval(r.timer);
+    r.outbox.stop();
     if (r === run) {
       live = '';
       publish();
     }
   }
 
-  /** Uploads what was recorded since the last upload; `final` closes the run. */
-  async function send(r: Run, final: boolean): Promise<FinishResult | null> {
-    r.unsent = r.unsent.concat(r.recorder.take());
-    const body = { steps: r.recorder.steps, inputs: r.unsent };
-    const sent = r.unsent.length;
-    const result = final ? await api.finish(r.id!, { ...body, look: opts.look() }) : (await api.beat(r.id!, body), null);
-    r.unsent = r.unsent.slice(sent);
-    return result;
-  }
-
-  function beat(r: Run): void {
-    if (r.state !== 'ranked') return;
-    if (r.sending) {
-      r.beatAgain = true;
-      return;
-    }
-    r.sending = send(r, false)
-      .then(() => undefined)
-      .catch((err: unknown) => {
-        // Network trouble and rate limits: the inputs stay queued for the next beat.
-        if (err instanceof ApiError && err.status >= 400 && err.status !== 429) unranked(r);
-      })
-      .finally(() => {
-        r.sending = null;
-        if (r.beatAgain) {
-          r.beatAgain = false;
-          beat(r);
-        }
-      });
+  /** Queues an upload of what was recorded up to now (it goes out once the run has its id). */
+  function upload(r: Run, kind: UploadKind): void {
+    r.outbox.push(kind, r.recorder.steps, r.recorder.take(), kind === 'finish' ? opts.look() : undefined);
   }
 
   async function finish(r: Run): Promise<void> {
     /** Where the player stood before this run, to tell a rank up. */
     const before = board?.me?.rank ?? null;
-    while (r.sending) await r.sending;
     note = 'CHECKING RUN';
     publish();
-    let result: FinishResult | null = null;
-    for (let i = 0; i < FINISH_TRIES && !result; i++) {
-      try {
-        result = await send(r, true);
-      } catch (err) {
-        if (err instanceof ApiError && err.status >= 400) break;
-        await sleep(1000 * (i + 1));
-      }
-    }
+    upload(r, 'finish');
+    const result = await r.outbox.finished();
     // Saved (whatever the verdict, its player can watch it): the game-over screen offers its replay.
     if (result) lastRun = r.id;
     if (!result) note = 'COULD NOT SUBMIT RUN';
@@ -237,7 +201,11 @@ export function createRanked(opts: RankedOptions): Ranked {
   function begin(afterCrash: boolean, first: InputFrame): void {
     opts.sim().setObstacleRandom(null);
     const multiplier = opts.multiplier();
-    const r: Run = { recorder: createInputRecorder(), afterCrash, state: 'starting', id: null, unsent: [], sending: null, beatAgain: false, timer: 0 };
+    const outbox = createOutbox({
+      send: (id, u) => (u.kind === 'finish' ? api.finish(id, u) : api.beat(id, u).then(() => null)),
+      onRefused: () => unranked(r),
+    });
+    const r: Run = { recorder: createInputRecorder(), afterCrash, state: 'starting', id: null, outbox, paused: false, timer: 0 };
     r.recorder.record(first);
     run = r;
     note = '';
@@ -248,7 +216,7 @@ export function createRanked(opts: RankedOptions): Ranked {
       return;
     }
     finishing
-      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: STALE ? SIM_VERSION - 1 : SIM_VERSION }))
+      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: STALE ? SIM_VERSION - 1 : SIM_VERSION, protocol: RUN_PROTOCOL }))
       .then(({ id, seed }) => {
         if (r.state !== 'starting') return;
         const sim = opts.sim();
@@ -260,7 +228,11 @@ export function createRanked(opts: RankedOptions): Ranked {
         sim.setObstacleRandom(mulberry32(seed));
         r.id = id;
         r.state = 'ranked';
-        r.timer = window.setInterval(() => beat(r), BEAT_MS);
+        // Sends a pause made while the seed was on its way, then everything after.
+        r.outbox.start(id);
+        r.timer = window.setInterval(() => {
+          if (r.state === 'ranked' && !r.paused) upload(r, 'tick');
+        }, BEAT_MS);
         live = 'RANKED';
         publish();
       })
@@ -305,11 +277,17 @@ export function createRanked(opts: RankedOptions): Ranked {
         else publish();
       }
     },
+    // Noted even before the seed arrives (the outbox holds them till then), so a pause in the
+    // run's first moments isn't counted as play.
     paused() {
-      if (run) beat(run);
+      if (!run || (run.state !== 'starting' && run.state !== 'ranked') || run.paused) return;
+      run.paused = true;
+      upload(run, 'pause');
     },
     resumed() {
-      if (run) beat(run);
+      if (!run || (run.state !== 'starting' && run.state !== 'ranked') || !run.paused) return;
+      run.paused = false;
+      upload(run, 'resume');
     },
     forfeit() {
       if (run && (run.state === 'starting' || run.state === 'ranked')) unranked(run);
