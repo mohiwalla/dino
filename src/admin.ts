@@ -155,10 +155,11 @@ async function setUser(u: AdminUser, banned: boolean): Promise<void> {
   await load();
 }
 
-/** Shows another page of the run tab, from its top. */
+/** Shows another page of the run tab, back at the top of the page. */
 function goTo(p: number): void {
   page = p;
-  void load().then(() => list.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  void load();
 }
 
 /** Redraws from what's loaded; the search box isn't redrawn, so it keeps its focus. */
