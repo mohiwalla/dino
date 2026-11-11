@@ -389,16 +389,6 @@
   opacity: 0.85;
 }
 
-/* WATCH REPLAY, under the restart prompt once the run has been saved (never in a replay). */
-.hud-over .hud-watch {
-  pointer-events: auto;
-}
-
-.hud-over .hud-watch[hidden],
-.hud:not([data-replay='off']) .hud-over .hud-watch {
-  display: none;
-}
-
 /* A replay's own presses are dropped: while it loads or plays there is nothing to press for (once it has
    played out, the game-over screen offers to watch it again). */
 .hud:not([data-replay='off'], [data-replay='over']) .hud-over .hud-restart,
