@@ -82,7 +82,7 @@ function draw(): void {
     pager(page, PAGE_SIZE, shown.length, (p) => {
       page = p;
       draw();
-      list.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }),
   );
 }
