@@ -1,6 +1,6 @@
 // The leaderboard (each player's best verified run) and the admin tools around it.
 
-import { requireUser } from './auth';
+import { requireUser, type User } from './auth';
 import type { Env } from './env';
 import { HttpError, json, readJson } from './http';
 
@@ -17,13 +17,13 @@ interface BoardRow {
   finished_at: number;
 }
 
-/** Each unbanned player's best ok run finished in [from, to), best first; ties go to whoever got there first. */
+/** Each unbanned player's best ok run (not deleted) finished in [from, to), best first; ties go to whoever got there first. */
 const BEST_RUNS = `
   SELECT user_id, name, score, mobile, fast, multiplier, run_id, finished_at FROM (
     SELECT r.user_id, u.name, r.score, r.mobile, r.fast, r.multiplier, r.id AS run_id, r.finished_at,
            ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.score DESC, r.finished_at ASC) AS n
     FROM runs r JOIN users u ON u.id = r.user_id
-    WHERE r.status = 'ok' AND u.banned = 0 AND r.finished_at >= ? AND r.finished_at < ?
+    WHERE r.status = 'ok' AND r.hidden = 0 AND u.banned = 0 AND r.finished_at >= ? AND r.finished_at < ?
   ) WHERE n = 1
   ORDER BY score DESC, finished_at ASC`;
 
@@ -84,9 +84,10 @@ export async function leaderboard(request: Request, env: Env): Promise<Response>
   });
 }
 
-async function requireAdmin(request: Request, env: Env): Promise<void> {
+async function requireAdmin(request: Request, env: Env): Promise<User> {
   const user = await requireUser(request, env);
   if (!user.admin) throw new HttpError(403, 'admins only');
+  return user;
 }
 
 /** GET /api/admin/runs?status=review|ok|rejected|void|all */
@@ -95,21 +96,29 @@ export async function adminRuns(request: Request, env: Env, url: URL): Promise<R
   const status = url.searchParams.get('status') ?? 'review';
   const where = status === 'all' ? "r.status NOT IN ('open', 'abandoned')" : 'r.status = ?';
   const query = env.DB.prepare(
-    `SELECT r.id, u.name, u.email, r.score, r.status, r.flags, r.mobile, r.fast, r.multiplier, r.steps, r.started_at, r.finished_at
+    `SELECT r.id, u.name, u.email, r.score, r.status, r.verdict, r.hidden, r.flags, r.mobile, r.fast, r.multiplier, r.steps, r.started_at, r.finished_at
      FROM runs r JOIN users u ON u.id = r.user_id WHERE ${where} ORDER BY r.finished_at DESC LIMIT 200`,
   );
   return json({ runs: (await (status === 'all' ? query : query.bind(status)).all()).results });
 }
 
-/** POST /api/admin/runs/:id {status: 'ok' | 'void'} */
+/** POST /api/admin/runs/:id {status: 'ok' | 'void'}, noted in run_reviews. */
 export async function adminSetRun(request: Request, env: Env, id: string): Promise<Response> {
-  await requireAdmin(request, env);
+  const admin = await requireAdmin(request, env);
   const { status } = await readJson(request);
   if (status !== 'ok' && status !== 'void') throw new HttpError(400, "status must be 'ok' or 'void'");
-  // A rejected run has no trusted score, so it cannot be approved.
-  const updated = await env.DB.prepare("UPDATE runs SET status = ? WHERE id = ? AND status IN ('ok', 'review', 'void') AND score IS NOT NULL")
-    .bind(status, id)
-    .run();
+  // A rejected run has no trusted score, so it cannot be approved. The review row is written
+  // first, in the same transaction, so it records the status the run had before.
+  const changeable = "id = ? AND status IN ('ok', 'review', 'void') AND score IS NOT NULL";
+  const [, updated] = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO run_reviews (run_id, admin_id, at, from_status, to_status) SELECT id, ?, ?, status, ? FROM runs WHERE ${changeable}`).bind(
+      admin.id,
+      Date.now(),
+      status,
+      id,
+    ),
+    env.DB.prepare(`UPDATE runs SET status = ? WHERE ${changeable}`).bind(status, id),
+  ]);
   if (updated.meta.changes !== 1) throw new HttpError(404, 'no such scored run');
   return json({ ok: true });
 }
@@ -119,7 +128,7 @@ export async function adminUsers(request: Request, env: Env): Promise<Response> 
   await requireAdmin(request, env);
   const users = await env.DB.prepare(
     `SELECT u.id, u.name, u.email, u.banned, u.created_at,
-            (SELECT MAX(score) FROM runs WHERE user_id = u.id AND status = 'ok') AS best,
+            (SELECT MAX(score) FROM runs WHERE user_id = u.id AND status = 'ok' AND hidden = 0) AS best,
             (SELECT COUNT(*) FROM runs WHERE user_id = u.id AND status != 'abandoned') AS runs
      FROM users u ORDER BY u.name`,
   ).all();

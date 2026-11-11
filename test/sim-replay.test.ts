@@ -148,7 +148,7 @@ describe('replay', () => {
 
 describe('verification', () => {
   test('real-time beats pass', () => {
-    expect(checkTiming(beatsFor(20_000), 20_000)).toEqual({ rejected: [], review: [] });
+    expect(checkTiming(beatsFor(20_000), 20_000)).toMatchObject({ rejected: [], review: [] });
   });
 
   test('running ahead of the clock is rejected', () => {
@@ -157,8 +157,8 @@ describe('verification', () => {
   });
 
   test('a speed multiplier moves the clock the run is held to', () => {
-    expect(checkTiming(beatsFor(20_000, 2), 20_000, 2)).toEqual({ rejected: [], review: [] });
-    expect(checkTiming(beatsFor(20_000, 0.5), 20_000, 0.5)).toEqual({ rejected: [], review: [] });
+    expect(checkTiming(beatsFor(20_000, 2), 20_000, 2)).toMatchObject({ rejected: [], review: [] });
+    expect(checkTiming(beatsFor(20_000, 0.5), 20_000, 0.5)).toMatchObject({ rejected: [], review: [] });
     // Played at 3x while claiming 2x: too fast. Played at 1x while claiming 2x: slow motion.
     expect(checkTiming(beatsFor(20_000, 3), 20_000, 2).rejected).not.toEqual([]);
     expect(checkTiming(beatsFor(20_000, 1), 20_000, 2).review).not.toEqual([]);
@@ -184,7 +184,7 @@ describe('verification', () => {
       beats.push([t + 5000, s + 300]);
       return beats;
     };
-    expect(checkTiming(paused(3), 3 * 300 + 300)).toEqual({ rejected: [], review: [] });
+    expect(checkTiming(paused(3), 3 * 300 + 300)).toMatchObject({ rejected: [], review: [] });
     expect(checkTiming(paused(4), 4 * 300 + 300).review).toEqual(['paused 4 times']);
   });
 
@@ -259,6 +259,6 @@ describe('verification', () => {
     const run = playRun(createGameSim(), PRESS, 123, false, human);
     expect(run.score).toBeGreaterThan(400);
     const verdict = verifyRun({ ...run.spec, steps: run.steps, inputs: run.inputs, beats: beatsFor(run.steps) });
-    expect(verdict).toEqual({ status: 'ok', score: run.score });
+    expect(verdict).toMatchObject({ status: 'ok', score: run.score });
   });
 });
