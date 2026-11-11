@@ -3,7 +3,7 @@
 
 import { revealPage } from './curtain';
 import { api } from './net/api';
-import { actionButton, call, confirmAction, duration, empty, h, heading, loading, panel, pill, px, pxWords, signIn, speed, stats, table, tabs, time, toast, topBar, watchLink } from './pages';
+import { actionButton, call, confirmAction, duration, empty, h, heading, loading, pager, panel, pill, px, pxWords, signIn, speed, stats, table, tabs, time, toast, topBar, watchLink } from './pages';
 
 type Tab = 'review' | 'all' | 'users';
 
@@ -26,6 +26,14 @@ interface AdminRun {
   finished_at: number | null;
 }
 
+/** One page of a run list, as GET /api/admin/runs sends it (worker/board.ts). */
+interface RunPage {
+  runs: AdminRun[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 interface AdminUser {
   id: string;
   name: string;
@@ -38,9 +46,15 @@ interface AdminUser {
 const root = document.getElementById('admin') as HTMLElement;
 let tab: Tab = 'review';
 let query = '';
-let review: AdminRun[] = [];
-let all: AdminRun[] | null = null;
+/** Runs waiting for review, whatever the search. */
+let reviewTotal = 0;
+/** The page of the current run tab, as loaded (null while it loads). */
+let runs: RunPage | null = null;
+let page = 1;
 let users: AdminUser[] = [];
+/** Searching the run lists asks the server, once typing pauses. */
+const SEARCH_WAIT_MS = 250;
+let searchTimer = 0;
 
 const summary = h('div');
 const tabBar = h('div');
@@ -49,17 +63,22 @@ const search = h('input', { type: 'search', className: 'search', placeholder: 'S
 search.spellcheck = false;
 search.addEventListener('input', () => {
   query = search.value.trim().toLowerCase();
-  draw();
+  if (tab === 'users') return draw();
+  clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    page = 1;
+    void load();
+  }, SEARCH_WAIT_MS);
 });
 
 const matches = (p: { name: string; email: string }) => !query || p.name.toLowerCase().includes(query) || p.email.toLowerCase().includes(query);
 
 const player = (p: { name: string; email: string }) => h('div', { className: 'player' }, px(p.name.toUpperCase()), h('span', { className: 'note' }, px(p.email)));
 
-function runsTable(runs: AdminRun[]): HTMLElement {
-  const shown = runs.filter(matches);
+/** The run tab's page, with the pager under it. The server has already applied the search. */
+function runsTable({ runs: shown, total, pageSize }: RunPage): HTMLElement {
   if (shown.length === 0) return empty(query ? 'NO RUNS FROM PLAYERS MATCHING THAT SEARCH' : tab === 'review' ? 'NOTHING TO REVIEW · ALL CLEAR' : 'NO RUNS YET');
-  return table(
+  const rows = table(
     [{ label: 'PLAYER' }, { label: 'SCORE', className: 'num' }, { label: 'STATUS' }, { label: 'WHY FLAGGED' }, { label: 'RUN' }, { label: 'FINISHED' }, { label: '', className: 'actions' }],
     shown.map((r) => {
       const actions = h('div', { className: 'cell' }, watchLink(r.id, true));
@@ -86,6 +105,7 @@ function runsTable(runs: AdminRun[]): HTMLElement {
       ];
     }),
   );
+  return h('div', {}, rows, pager(page, pageSize, total, goTo));
 }
 
 /** The run's status, with what the checks said if an admin has since changed it, and whether the player deleted it. */
@@ -135,12 +155,18 @@ async function setUser(u: AdminUser, banned: boolean): Promise<void> {
   await load();
 }
 
-/** Redraws from what's loaded; searching only calls this, so the box keeps its focus. */
+/** Shows another page of the run tab, from its top. */
+function goTo(p: number): void {
+  page = p;
+  void load().then(() => list.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+}
+
+/** Redraws from what's loaded; the search box isn't redrawn, so it keeps its focus. */
 function draw(): void {
   const banned = users.filter((u) => u.banned).length;
   summary.replaceChildren(
     stats([
-      ['IN REVIEW', String(review.length), review.length ? 'WAITING ON YOU' : 'ALL CLEAR'],
+      ['IN REVIEW', String(reviewTotal), reviewTotal ? 'WAITING ON YOU' : 'ALL CLEAR'],
       ['PLAYERS', String(users.length), `${users.filter((u) => u.runs > 0).length} HAVE PLAYED`],
       ['BANNED', String(banned)],
     ]),
@@ -148,29 +174,46 @@ function draw(): void {
   tabBar.replaceChildren(
     tabs<Tab>(
       [
-        ['review', 'IN REVIEW', review.length],
+        ['review', 'IN REVIEW', reviewTotal],
         ['all', 'ALL RUNS'],
         ['users', 'PLAYERS'],
       ],
       tab,
       (t) => {
         tab = t;
+        page = 1;
+        runs = null;
         void load();
       },
     ),
   );
-  if (tab === 'all' && all === null) list.replaceChildren(loading());
-  else list.replaceChildren(tab === 'users' ? usersTable() : runsTable(tab === 'review' ? review : (all ?? [])));
+  if (tab === 'users') list.replaceChildren(usersTable());
+  else list.replaceChildren(runs ? runsTable(runs) : loading());
 }
 
+const runPage = (status: string, p: number, q: string) => call<RunPage>(`admin/runs?status=${status}&page=${p}&q=${encodeURIComponent(q)}`);
+
+/** Counts loads, so an older one (an earlier search, say) that answers late is dropped. */
+let loads = 0;
+
 async function load(): Promise<void> {
+  const mine = ++loads;
   draw();
   try {
-    [review, users, all] = await Promise.all([
-      call<{ runs: AdminRun[] }>('admin/runs?status=review').then((r) => r.runs),
+    const shown = tab === 'users' ? Promise.resolve(runs) : runPage(tab, page, query);
+    const [total, all, got] = await Promise.all([
+      runPage('review', 1, '').then((r) => r.total),
       call<{ users: AdminUser[] }>('admin/users').then((r) => r.users),
-      tab === 'all' ? call<{ runs: AdminRun[] }>('admin/runs?status=all').then((r) => r.runs) : Promise.resolve(all),
+      shown,
     ]);
+    // Past the last page (the list shrank, say after a void): show the last one there is.
+    let current = got;
+    if (current && current.runs.length === 0 && current.total > 0 && page > 1) {
+      page = Math.ceil(current.total / current.pageSize);
+      current = await runPage(tab, page, query);
+    }
+    if (mine !== loads) return;
+    [reviewTotal, users, runs] = [total, all, current];
   } catch (err) {
     toast(err instanceof Error ? err.message : String(err), 'bad');
   }

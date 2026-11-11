@@ -182,6 +182,21 @@ export function table(columns: readonly Column[], rows: readonly (readonly (Node
   return h('div', { className: 'table' }, h('table', {}, head, body));
 }
 
+/**
+ * "51-100 OF 897" with PREV and NEXT, under a list shown a page at a time. Nothing when the list
+ * fits on one page. `go` gets the page (1-based) to show.
+ */
+export function pager(page: number, pageSize: number, total: number, go: (page: number) => void): HTMLElement | string {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) return '';
+  const prev = chip('PREV', () => go(page - 1));
+  const next = chip('NEXT', () => go(page + 1));
+  prev.disabled = page <= 1;
+  next.disabled = page >= pages;
+  const first = (page - 1) * pageSize + 1;
+  return h('nav', { className: 'pager', ariaLabel: 'Pages' }, h('span', { className: 'muted' }, px(`${first}-${Math.min(page * pageSize, total)} OF ${total}`)), prev, next);
+}
+
 export function empty(text: string, ...extra: (Node | string)[]): HTMLElement {
   return h('div', { className: 'empty' }, pxWords(text), ...extra);
 }
