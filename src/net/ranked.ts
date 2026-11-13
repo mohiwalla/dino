@@ -105,6 +105,10 @@ export function createRanked(opts: RankedOptions): Ranked {
    * the upload: the board refresh after it would hold up the next run's seed past STEPS.CLEAR.
    */
   let finishing: Promise<unknown> = Promise.resolve();
+  /** Counts refresh() calls: only the latest to start may show what it got, as the next run no longer waits for one. */
+  let refreshes = 0;
+  /** The player's rank on the all-time board, from the latest verdict or board load (a rank up is told from it). */
+  let knownRank: number | null = null;
 
   /** A board's top rows, plus the player's own row at the end if they are further down. */
   function rows(list: BoardList | undefined): BoardEntry[] {
@@ -136,15 +140,19 @@ export function createRanked(opts: RankedOptions): Ranked {
   }
 
   async function refresh(): Promise<void> {
+    const n = ++refreshes;
     try {
       // Both at once; the board just fails (401) when signed out.
       const [me, data] = await Promise.all([api.me(), api.leaderboard().catch(() => null)]);
+      if (n !== refreshes) return;
       account = me;
       board = me ? data : null;
+      knownRank = board?.me?.rank ?? null;
       reachable = true;
       if (me?.admin) opts.onAdmin();
       writeCache({ account, board });
     } catch {
+      if (n !== refreshes) return;
       // Offline, or a plain static host without the server: no leaderboard UI at all.
       reachable = account !== null;
     }
@@ -156,6 +164,7 @@ export function createRanked(opts: RankedOptions): Ranked {
   if (cached) {
     account = cached.account;
     board = cached.board;
+    knownRank = board?.me?.rank ?? null;
     reachable = true;
     publish();
   }
@@ -180,7 +189,7 @@ export function createRanked(opts: RankedOptions): Ranked {
   /** Sends the run's finish; resolves once the server has it, while shown() goes on to refresh the board. */
   function finish(r: Run): Promise<unknown> {
     /** Where the player stood before this run, to tell a rank up. */
-    const before = board?.me?.rank ?? null;
+    const before = knownRank;
     note = 'CHECKING RUN';
     publish();
     upload(r, 'finish');
@@ -191,6 +200,7 @@ export function createRanked(opts: RankedOptions): Ranked {
 
   /** Shows the server's verdict on a finished run, and the board with it. */
   async function shown(result: FinishResult | null, before: number | null): Promise<void> {
+    let cheer: BoardView['newBest'] = null;
     if (!result) note = 'COULD NOT SUBMIT RUN';
     else if (result.status === 'review') note = 'RUN SENT FOR REVIEW';
     else if (result.status === 'rejected') note = 'RUN FAILED THE CHECKS';
@@ -199,10 +209,12 @@ export function createRanked(opts: RankedOptions): Ranked {
     if (result?.status === 'ok' && result.rank !== null) {
       opts.onRank(result.rank);
       // A new best is cheered whether or not it moves the rank (staying #1 with a higher score counts).
-      if (before === null || result.previousBest === null || (result.score ?? 0) > result.previousBest || result.rank < before) newBest = { from: before, to: result.rank };
+      if (before === null || result.previousBest === null || (result.score ?? 0) > result.previousBest || result.rank < before) newBest = cheer = { from: before, to: result.rank };
+      knownRank = result.rank;
     }
     await refresh();
-    newBest = null;
+    // A later run's verdict may have put up its own.
+    if (newBest === cheer) newBest = null;
   }
 
   function begin(afterCrash: boolean, first: InputFrame): void {
