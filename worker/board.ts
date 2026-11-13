@@ -46,9 +46,48 @@ export function weekStart(now: number): number {
   return midnight - sinceMonday * DAY_MS - IST_OFFSET_MS;
 }
 
-/** The player's 1-based place on the board, or null if they have no verified run. */
-export async function boardRank(env: Env, userId: string): Promise<number | null> {
-  const i = (await bestRuns(env)).findIndex((r) => r.user_id === userId);
+/** Each player's best run of all time (`rows`), of this week, and of last week. */
+export interface Boards {
+  rows: BoardRow[];
+  week: BoardRow[];
+  last: BoardRow[];
+}
+
+/**
+ * The boards, from the one-row cache (migrations/0008_board_cache.sql) while nothing has changed
+ * them; otherwise built from the runs, which reads every verified run, and cached again. A change
+ * made while they were being built leaves them uncached, as its version bump moved past them.
+ */
+export async function boards(env: Env, now = Date.now()): Promise<Boards> {
+  const start = weekStart(now);
+  const cache = await env.DB.prepare('SELECT version, built, week_start, data FROM board WHERE id = 1').first<{
+    version: number;
+    built: number;
+    week_start: number;
+    data: string | null;
+  }>();
+  if (cache?.data && cache.built === cache.version && cache.week_start === start) return JSON.parse(cache.data) as Boards;
+  const [rows, week, last] = await Promise.all([bestRuns(env), bestRuns(env, start), bestRuns(env, start - WEEK_MS, start)]);
+  const built = { rows, week, last };
+  if (cache) {
+    await env.DB.prepare('UPDATE board SET built = ?, week_start = ?, data = ? WHERE id = 1 AND version = ?')
+      .bind(cache.version, start, JSON.stringify(built), cache.version)
+      .run();
+  }
+  return built;
+}
+
+/**
+ * Something changed what the boards show (a new best, a run approved, voided or deleted, a ban, a
+ * new name). Run it after that change is written, so a build can't cache the boards from before it.
+ */
+export function boardChanged(env: Env): D1PreparedStatement {
+  return env.DB.prepare('UPDATE board SET version = version + 1 WHERE id = 1');
+}
+
+/** The player's 1-based place on the all-time board, or null if they have no verified run. */
+export function boardRank(b: Boards, userId: string): number | null {
+  const i = b.rows.findIndex((r) => r.user_id === userId);
   return i < 0 ? null : i + 1;
 }
 
@@ -61,7 +100,7 @@ export async function leaderboard(request: Request, env: Env): Promise<Response>
   const user = await requireUser(request, env);
   const now = Date.now();
   const start = weekStart(now);
-  const [rows, week, last] = await Promise.all([bestRuns(env), bestRuns(env, start), bestRuns(env, start - WEEK_MS, start)]);
+  const { rows, week, last } = await boards(env, now);
   const board = (list: BoardRow[]) => {
     const mine = list.findIndex((r) => r.user_id === user.id);
     return { entries: list.slice(0, BOARD_SIZE).map(entry), me: mine < 0 ? null : { rank: mine + 1, score: list[mine].score }, players: list.length };
@@ -141,6 +180,7 @@ export async function adminSetRun(request: Request, env: Env, id: string): Promi
       id,
     ),
     env.DB.prepare(`UPDATE runs SET status = ? WHERE ${changeable}`).bind(status, id),
+    boardChanged(env),
   ]);
   if (updated.meta.changes !== 1) throw new HttpError(404, 'no such scored run');
   return json({ ok: true });
@@ -163,7 +203,7 @@ export async function adminSetUser(request: Request, env: Env, id: string): Prom
   await requireAdmin(request, env);
   const { banned } = await readJson(request);
   if (typeof banned !== 'boolean') throw new HttpError(400, 'banned must be true or false');
-  const updated = await env.DB.prepare('UPDATE users SET banned = ? WHERE id = ?').bind(banned ? 1 : 0, id).run();
+  const [updated] = await env.DB.batch([env.DB.prepare('UPDATE users SET banned = ? WHERE id = ?').bind(banned ? 1 : 0, id), boardChanged(env)]);
   if (updated.meta.changes !== 1) throw new HttpError(404, 'no such user');
   return json({ ok: true });
 }

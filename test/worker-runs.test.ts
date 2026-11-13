@@ -196,6 +196,56 @@ describe('evidence', () => {
   });
 });
 
+describe('the board', () => {
+  const version = (w: TestWorker) => (w.db.query('SELECT version FROM board').get() as { version: number }).version;
+  type Entry = { name: string; score: number };
+  const scores = async (w: TestWorker, token: string) => {
+    const res = await w.call(token, 'GET', '/api/leaderboard');
+    expect(res.status).toBe(200);
+    const b = res.body as { entries: Entry[]; week: { entries: Entry[] }; lastWeek: Entry[] };
+    const names = (list: Entry[]) => list.map((e) => `${e.name} ${e.score}`);
+    return { all: names(b.entries), week: names(b.week.entries), lastWeek: names(b.lastWeek) };
+  };
+
+  test('is built once, and rebuilt when something changes what it shows', async () => {
+    tick(0);
+    const w = createTestWorker();
+    const ana = await w.player('ana');
+    const bob = await w.player('bob');
+    const admin = await w.player('root', { admin: true });
+    const first = await ranked(w, ana);
+    expect((await scores(w, ana)).all).toEqual([`ana ${first.score}`]);
+
+    // Served from the cache: a change behind the Worker's back doesn't show.
+    w.db.query('UPDATE runs SET score = 99999 WHERE id = ?').run(first.id);
+    expect((await scores(w, ana)).all).toEqual([`ana ${first.score}`]);
+    w.db.query('UPDATE runs SET score = ? WHERE id = ?').run(first.score, first.id);
+
+    // A run that doesn't beat the player's best this week changes nothing.
+    const v = version(w);
+    await ranked(w, ana);
+    expect(version(w)).toBe(v);
+    // A player's first run does, and their rank comes from the rebuilt board.
+    const bobs = await ranked(w, bob, 50);
+    expect(version(w)).toBe(v + 1);
+    expect((await scores(w, bob)).all).toHaveLength(2);
+    expect(JSON.parse((w.db.query('SELECT receipt FROM runs WHERE id = ?').get(bobs.id) as { receipt: string }).receipt).rank).not.toBeNull();
+
+    // A ban, and an admin voiding a run.
+    expect((await w.call(admin, 'POST', '/api/admin/users/user-bob', { banned: true })).status).toBe(200);
+    expect((await scores(w, ana)).all).toEqual([`ana ${first.score}`]);
+    await w.call(admin, 'POST', '/api/admin/users/user-bob', { banned: false });
+    expect((await scores(w, ana)).all).toHaveLength(2);
+    w.db.query("UPDATE runs SET status = 'void' WHERE user_id = 'user-ana' AND id != ?").run(first.id);
+    expect((await w.call(admin, 'POST', `/api/admin/runs/${first.id}`, { status: 'void' })).status).toBe(200);
+    expect((await scores(w, ana)).all).toEqual([`bob ${bobs.score}`]);
+
+    // A new week: this week's board starts empty, and last week's winners are the old week's.
+    tick(8 * 24 * 60 * 60 * 1000);
+    expect(await scores(w, ana)).toEqual({ all: [`bob ${bobs.score}`], week: [], lastWeek: [`bob ${bobs.score}`] });
+  });
+});
+
 /** The change points of `inputs` at steps in [from, to): what one upload carries. */
 const chunk = (inputs: number[], from: number, to: number) => inputs.flatMap((v, i) => (i % 2 === 0 && v >= from && v < to ? [v, inputs[i + 1]] : []));
 

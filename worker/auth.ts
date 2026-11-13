@@ -2,6 +2,7 @@
 // Authorization code flow with PKCE, done here on the server; the browser only ever holds an
 // HttpOnly session cookie.
 
+import { boardChanged } from './board';
 import type { Env } from './env';
 import { base64url, base64urlDecode, cookie, HttpError, json, randomToken, sha256 } from './http';
 
@@ -88,12 +89,15 @@ async function startSession(url: URL, env: Env, userId: string, next: string): P
 }
 
 async function upsertUser(env: Env, id: string, name: string, email: string): Promise<void> {
+  const renamed = await env.DB.prepare('SELECT 1 FROM users WHERE id = ? AND name != ?').bind(id, name).first();
   await env.DB.prepare(
     `INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET name = excluded.name, email = excluded.email`,
   )
     .bind(id, name, email, Date.now())
     .run();
+  // The boards show names.
+  if (renamed) await boardChanged(env).run();
 }
 
 /** GET /api/auth/login?next=/path: off to Microsoft. */

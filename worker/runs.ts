@@ -9,7 +9,7 @@ import { RUN_PROTOCOL, SIM_VERSION, type UploadKind } from '../src/sim/replay';
 import { requireUser, type User } from './auth';
 import type { Env } from './env';
 import { HttpError, json, randomToken, readJson, sha256 } from './http';
-import { boardRank, weekStart } from './board';
+import { boardChanged, boardRank, boards, weekStart } from './board';
 import { verifyRun, type Beat } from './verify';
 
 /** Open runs older than this are dead (closed tab, lost connection). */
@@ -266,7 +266,10 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
   }
   checkOpen(run, now);
   const next = extend(run, up, now);
-  const previousBest = await bestScore(env, user.id);
+  const before = await boards(env, now);
+  const previousBest = before.rows.find((r) => r.user_id === user.id)?.score ?? null;
+  /** This week's best, which a new best of any kind beats. */
+  const weekBest = before.week.find((r) => r.user_id === user.id)?.score ?? null;
   const verdict = verifyRun({
     seed: run.seed,
     mobile: run.mobile === 1,
@@ -307,11 +310,13 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
     .run();
   if (updated.meta.changes !== 1) throw new HttpError(409, 'run changed, send again');
   if (verdict.status !== 'ok') console.log(`run ${id} by ${user.email}: ${verdict.status} (${flags})`);
+  const changed = verdict.status === 'ok' && (weekBest === null || (score ?? 0) > weekBest);
+  if (changed) await boardChanged(env).run();
   const receipt = {
     status: verdict.status,
     score,
     previousBest,
-    rank: verdict.status === 'ok' ? await boardRank(env, user.id) : null,
+    rank: verdict.status === 'ok' ? boardRank(changed ? await boards(env) : before, user.id) : null,
   };
   // Kept for a resend of this finish whose answer was lost.
   await env.DB.prepare('UPDATE runs SET receipt = ? WHERE id = ?').bind(JSON.stringify(receipt), id).run();
@@ -326,15 +331,8 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
 export async function deleteRuns(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   playable(user);
-  await env.DB.prepare('UPDATE runs SET hidden = 1 WHERE user_id = ?').bind(user.id).run();
+  await env.DB.batch([env.DB.prepare('UPDATE runs SET hidden = 1 WHERE user_id = ?').bind(user.id), boardChanged(env)]);
   return json({ ok: true });
-}
-
-async function bestScore(env: Env, userId: string): Promise<number | null> {
-  const row = await env.DB.prepare("SELECT MAX(score) AS best FROM runs WHERE user_id = ? AND status = 'ok' AND hidden = 0")
-    .bind(userId)
-    .first<{ best: number | null }>();
-  return row?.best ?? null;
 }
 
 /**
