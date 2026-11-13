@@ -74,6 +74,28 @@ describe('finishing a run', () => {
     expect(finish.body.status).toBe('ok');
     expect(finish.body.score).toBe(run.score);
   });
+  test('a start leaves the runs it names open for their finish, and abandons the rest', async () => {
+    setSystemTime(new Date(T0));
+    const w = createTestWorker();
+    const token = await w.player('ana');
+    const first = await w.call(token, 'POST', '/api/runs', START);
+    const id = first.body.id as string;
+    w.db.query('UPDATE runs SET seed = 7 WHERE id = ?').run(id);
+    const run = playRun({ seed: 7, mobile: false, afterCrash: false }, 0);
+    tick(run.steps * SIM.STEP_MS + 100);
+    // The player restarts while the first run's finish is still on its way.
+    const next = await w.call(token, 'POST', '/api/runs', { ...START, afterCrash: true, after: [id] });
+    expect(next.status).toBe(200);
+    expect(status(w, id).status).toBe('open');
+    const finish = await w.call(token, 'POST', `/api/runs/${id}/finish`, { seq: 1, kind: 'finish', steps: run.steps, inputs: run.inputs });
+    expect(finish.body.status).toBe('ok');
+    // A start that doesn't name the run in play abandons it, as before.
+    const third = await w.call(token, 'POST', '/api/runs', { ...START, afterCrash: true });
+    expect(third.status).toBe(200);
+    expect(status(w, next.body.id as string).status).toBe('abandoned');
+    const tooMany = await w.call(token, 'POST', '/api/runs', { ...START, after: ['a', 'b', 'c'] });
+    expect(tooMany.status).toBe(400);
+  });
 });
 
 describe('evidence', () => {
