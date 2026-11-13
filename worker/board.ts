@@ -34,7 +34,7 @@ async function bestRuns(env: Env, from = 0, to = Number.MAX_SAFE_INTEGER): Promi
 /** Weeks run Monday 00:00 to Sunday 23:59, India time (UTC+5:30, no daylight saving). */
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const WEEK_MS = 7 * DAY_MS;
+export const WEEK_MS = 7 * DAY_MS;
 /** Last week's winners are announced for the first days of the new week. */
 const ANNOUNCE_MS = 3 * DAY_MS;
 

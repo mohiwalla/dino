@@ -9,7 +9,7 @@ import { RUN_PROTOCOL, SIM_VERSION, type UploadKind } from '../src/sim/replay';
 import { requireUser, type User } from './auth';
 import type { Env } from './env';
 import { HttpError, json, randomToken, readJson, sha256 } from './http';
-import { boardChanged, boardRank, boards, weekStart } from './board';
+import { boardChanged, boardRank, boards, WEEK_MS, weekStart } from './board';
 import { verifyRun, type Beat } from './verify';
 
 /** Open runs older than this are dead (closed tab, lost connection). */
@@ -310,9 +310,10 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
     env.DB.prepare(
       `UPDATE board SET version = version + 1 WHERE id = 1
          AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'ok' AND hidden = 0 AND last_upload = ?)
-         AND NOT EXISTS (SELECT 1 FROM runs WHERE user_id = ? AND id != ? AND status = 'ok' AND hidden = 0 AND finished_at >= ?
+         AND NOT EXISTS (SELECT 1 FROM runs INDEXED BY runs_week
+                         WHERE user_id = ? AND id != ? AND status = 'ok' AND hidden = 0 AND finished_at >= ? AND finished_at < ?
                            AND (score > ? OR (score = ? AND finished_at <= ?)))`,
-    ).bind(id, hash, user.id, id, weekStart(now), score, score, now),
+    ).bind(id, hash, user.id, id, weekStart(now), weekStart(now) + WEEK_MS, score, score, now),
   ]);
   if (updated.meta.changes !== 1) throw new HttpError(409, 'run changed, send again');
   if (verdict.status !== 'ok') console.log(`run ${id} by ${user.email}: ${verdict.status} (${flags})`);
