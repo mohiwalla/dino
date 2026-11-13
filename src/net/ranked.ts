@@ -13,7 +13,7 @@ import { mulberry32 } from '../sim/rng';
 import { createInputRecorder, RUN_PROTOCOL, SIM_VERSION, type InputRecorder, type UploadKind } from '../sim/replay';
 import { STEPS } from '../sim/steps';
 import type { BoardEntry, BoardView, GameEvent, GameSim, InputFrame, RunLook } from '../types';
-import { api, ApiError, type Account, type BoardData, type BoardList } from './api';
+import { api, ApiError, type Account, type BoardData, type BoardList, type FinishResult } from './api';
 import { createOutbox, type Outbox } from './outbox';
 
 const BEAT_MS = 10_000;
@@ -100,8 +100,15 @@ export function createRanked(opts: RankedOptions): Ranked {
   let lastRunRanked = false;
   /** The server said this tab's game is out of date (it was updated since the page loaded). */
   let outdated = false;
-  /** The last finish upload; the next run's start waits for it, so it can't abandon that run. */
+  /**
+   * The last finish upload; the next run's start waits for it, so it can't abandon that run. Only
+   * the upload: the board refresh after it would hold up the next run's seed past STEPS.CLEAR.
+   */
   let finishing: Promise<unknown> = Promise.resolve();
+  /** Counts refresh() calls: only the latest to start may show what it got, as the next run no longer waits for one. */
+  let refreshes = 0;
+  /** The player's rank on the all-time board, from the latest verdict or board load (a rank up is told from it). */
+  let knownRank: number | null = null;
 
   /** A board's top rows, plus the player's own row at the end if they are further down. */
   function rows(list: BoardList | undefined): BoardEntry[] {
@@ -133,15 +140,19 @@ export function createRanked(opts: RankedOptions): Ranked {
   }
 
   async function refresh(): Promise<void> {
+    const n = ++refreshes;
     try {
       // Both at once; the board just fails (401) when signed out.
       const [me, data] = await Promise.all([api.me(), api.leaderboard().catch(() => null)]);
+      if (n !== refreshes) return;
       account = me;
       board = me ? data : null;
+      knownRank = board?.me?.rank ?? null;
       reachable = true;
       if (me?.admin) opts.onAdmin();
       writeCache({ account, board });
     } catch {
+      if (n !== refreshes) return;
       // Offline, or a plain static host without the server: no leaderboard UI at all.
       reachable = account !== null;
     }
@@ -153,18 +164,19 @@ export function createRanked(opts: RankedOptions): Ranked {
   if (cached) {
     account = cached.account;
     board = cached.board;
+    knownRank = board?.me?.rank ?? null;
     reachable = true;
     publish();
   }
 
-  /** The run stops counting; the HUD just drops its RANKED line. */
-  function unranked(r: Run): void {
+  /** The run stops counting; the HUD's RANKED line becomes `why` (blank for a run that was never going to count). */
+  function unranked(r: Run, why = 'NOT RANKED'): void {
     if (r.state === 'finished') return;
     r.state = 'unranked';
     clearInterval(r.timer);
     r.outbox.stop();
     if (r === run) {
-      live = '';
+      live = why;
       publish();
     }
   }
@@ -174,13 +186,21 @@ export function createRanked(opts: RankedOptions): Ranked {
     r.outbox.push(kind, r.recorder.steps, r.recorder.take(), kind === 'finish' ? opts.look() : undefined);
   }
 
-  async function finish(r: Run): Promise<void> {
+  /** Sends the run's finish; resolves once the server has it, while shown() goes on to refresh the board. */
+  function finish(r: Run): Promise<unknown> {
     /** Where the player stood before this run, to tell a rank up. */
-    const before = board?.me?.rank ?? null;
+    const before = knownRank;
     note = 'CHECKING RUN';
     publish();
     upload(r, 'finish');
-    const result = await r.outbox.finished();
+    const result = r.outbox.finished();
+    void result.then((verdict) => shown(verdict, before));
+    return result;
+  }
+
+  /** Shows the server's verdict on a finished run, and the board with it. */
+  async function shown(result: FinishResult | null, before: number | null): Promise<void> {
+    let cheer: BoardView['newBest'] = null;
     if (!result) note = 'COULD NOT SUBMIT RUN';
     else if (result.status === 'review') note = 'RUN SENT FOR REVIEW';
     else if (result.status === 'rejected') note = 'RUN FAILED THE CHECKS';
@@ -189,10 +209,12 @@ export function createRanked(opts: RankedOptions): Ranked {
     if (result?.status === 'ok' && result.rank !== null) {
       opts.onRank(result.rank);
       // A new best is cheered whether or not it moves the rank (staying #1 with a higher score counts).
-      if (before === null || result.previousBest === null || (result.score ?? 0) > result.previousBest || result.rank < before) newBest = { from: before, to: result.rank };
+      if (before === null || result.previousBest === null || (result.score ?? 0) > result.previousBest || result.rank < before) newBest = cheer = { from: before, to: result.rank };
+      knownRank = result.rank;
     }
     await refresh();
-    newBest = null;
+    // A later run's verdict may have put up its own.
+    if (newBest === cheer) newBest = null;
   }
 
   function begin(afterCrash: boolean, first: InputFrame): void {
@@ -208,7 +230,7 @@ export function createRanked(opts: RankedOptions): Ranked {
     note = '';
     live = '';
     if (!account || account.banned || !opts.rankable()) {
-      unranked(r);
+      unranked(r, '');
       return;
     }
     finishing
@@ -272,6 +294,8 @@ export function createRanked(opts: RankedOptions): Ranked {
         if (ranked) finishing = Promise.resolve().then(() => finish(r));
         else publish();
       }
+      // Obstacles are due and the seed isn't here: the run can't count, so say so now, not when (or if) it turns up.
+      if (run.state === 'starting' && opts.sim().getSnapshot().runFrames > STEPS.CLEAR) unranked(run);
     },
     // Noted even before the seed arrives (the outbox holds them till then), so a pause in the
     // run's first moments isn't counted as play.
