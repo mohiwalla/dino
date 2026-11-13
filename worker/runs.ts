@@ -9,7 +9,7 @@ import { RUN_PROTOCOL, SIM_VERSION, type UploadKind } from '../src/sim/replay';
 import { requireUser, type User } from './auth';
 import type { Env } from './env';
 import { HttpError, json, randomToken, readJson, sha256 } from './http';
-import { boardRank, weekStart } from './board';
+import { boardChanged, boardRank, boards, WEEK_MS, weekStart } from './board';
 import { verifyRun, type Beat } from './verify';
 
 /** Open runs older than this are dead (closed tab, lost connection). */
@@ -282,12 +282,12 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
   const flags = verdict.status === 'ok' ? null : verdict.flags.join('; ');
   // The game cheers a ranked run that beats the player's best (or is their first); its replay does too.
   const cheered = verdict.status === 'ok' && (previousBest === null || (score ?? 0) > previousBest);
-  const updated = await env.DB.prepare(
-    `UPDATE runs SET steps = ?, inputs = ?, beats = ?, finished_at = ?, score = ?, status = ?, verdict = ?, flags = ?, checks = ?, look = ?, cheered = ?,
-       last_seq = ?, last_upload = ?
-     WHERE id = ? AND status = 'open' AND last_seq = ?`,
-  )
-    .bind(
+  const [updated] = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE runs SET steps = ?, inputs = ?, beats = ?, finished_at = ?, score = ?, status = ?, verdict = ?, flags = ?, checks = ?, look = ?, cheered = ?,
+         last_seq = ?, last_upload = ?
+       WHERE id = ? AND status = 'open' AND last_seq = ?`,
+    ).bind(
       next.steps,
       JSON.stringify(next.inputs),
       JSON.stringify(next.beats),
@@ -303,15 +303,25 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
       hash,
       id,
       run.last_seq,
-    )
-    .run();
+    ),
+    // In the same transaction, so no board can be built from the run without the change showing:
+    // the boards change if the run, now ok, is the player's best this week (which a new all-time
+    // best also is). Ties go to whoever finished first, as on the board.
+    env.DB.prepare(
+      `UPDATE board SET version = version + 1 WHERE id = 1
+         AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'ok' AND hidden = 0 AND last_upload = ?)
+         AND NOT EXISTS (SELECT 1 FROM runs INDEXED BY runs_week
+                         WHERE user_id = ? AND id != ? AND status = 'ok' AND hidden = 0 AND finished_at >= ? AND finished_at < ?
+                           AND (score > ? OR (score = ? AND finished_at <= ?)))`,
+    ).bind(id, hash, user.id, id, weekStart(now), weekStart(now) + WEEK_MS, score, score, now),
+  ]);
   if (updated.meta.changes !== 1) throw new HttpError(409, 'run changed, send again');
   if (verdict.status !== 'ok') console.log(`run ${id} by ${user.email}: ${verdict.status} (${flags})`);
   const receipt = {
     status: verdict.status,
     score,
     previousBest,
-    rank: verdict.status === 'ok' ? await boardRank(env, user.id) : null,
+    rank: verdict.status === 'ok' ? boardRank(await boards(env), user.id) : null,
   };
   // Kept for a resend of this finish whose answer was lost.
   await env.DB.prepare('UPDATE runs SET receipt = ? WHERE id = ?').bind(JSON.stringify(receipt), id).run();
@@ -326,15 +336,16 @@ export async function finishRun(request: Request, env: Env, id: string): Promise
 export async function deleteRuns(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   playable(user);
-  await env.DB.prepare('UPDATE runs SET hidden = 1 WHERE user_id = ?').bind(user.id).run();
+  await env.DB.batch([env.DB.prepare('UPDATE runs SET hidden = 1 WHERE user_id = ?').bind(user.id), boardChanged(env)]);
   return json({ ok: true });
 }
 
+/** The player's best verified run, if any (one step down the runs_best index). */
 async function bestScore(env: Env, userId: string): Promise<number | null> {
-  const row = await env.DB.prepare("SELECT MAX(score) AS best FROM runs WHERE user_id = ? AND status = 'ok' AND hidden = 0")
+  const row = await env.DB.prepare("SELECT score FROM runs WHERE user_id = ? AND status = 'ok' AND hidden = 0 ORDER BY score DESC LIMIT 1")
     .bind(userId)
-    .first<{ best: number | null }>();
-  return row?.best ?? null;
+    .first<{ score: number }>();
+  return row?.score ?? null;
 }
 
 /**
