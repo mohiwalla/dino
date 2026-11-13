@@ -103,6 +103,9 @@ export function createRanked(opts: RankedOptions): Ranked {
   let outdated = false;
   /** Runs whose finish is on its way, oldest first: a start names them, so the server doesn't abandon them. */
   const finishing = new Set<string>();
+  /** Numbers finished runs, and the latest whose verdict was shown: an older verdict arriving after it only refreshes the board. */
+  let finishes = 0;
+  let shownFinish = 0;
   /** Counts refresh() calls: only the latest to start may show what it got, as the next run no longer waits for one. */
   let refreshes = 0;
   /** The player's rank on the all-time board, from the latest verdict or board load (a rank up is told from it). */
@@ -193,9 +196,14 @@ export function createRanked(opts: RankedOptions): Ranked {
     publish();
     upload(r, 'finish');
     finishing.add(id);
+    const n = ++finishes;
     void r.outbox.finished().then((verdict) => {
       finishing.delete(id);
-      return shown(verdict, before);
+      if (n > shownFinish) {
+        shownFinish = n;
+        return shown(verdict, before);
+      }
+      return refresh();
     });
   }
 

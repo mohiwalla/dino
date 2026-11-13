@@ -17,6 +17,8 @@ const RUN_TTL_MS = 2 * 60 * 60 * 1000;
 const STARTS_PER_MINUTE = 30;
 /** Runs a start may leave open for their finish (the browser sends its last two at most). */
 const MAX_FINISHING = 2;
+/** How long a run left open for its finish has to send it (the browser gives up after a minute). */
+const FINISH_WINDOW_MS = 90_000;
 /** Uploads to one run within a second, beyond which it is told to slow down (a retry is fine). */
 const UPLOADS_PER_SECOND = 20;
 /** Uploads one run may make in all (a tick every 10 s for its two hours is 720). */
@@ -41,6 +43,7 @@ interface RunRow {
   last_seq: number;
   last_upload: string | null;
   receipt: string | null;
+  superseded_at: number | null;
 }
 
 /** An upload as the browser sent it (src/net/outbox.ts). */
@@ -82,8 +85,13 @@ export async function startRun(request: Request, env: Env): Promise<Response> {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0];
   const beats: Beat[] = [[now, 0]];
   await env.DB.batch([
-    // One run in play per player: starting a new one abandons the last, unless its finish is on its way.
-    env.DB.prepare("UPDATE runs SET status = 'abandoned' WHERE user_id = ? AND status = 'open' AND id NOT IN (SELECT value FROM json_each(?))").bind(
+    // One run in play per player: starting a new one abandons the last, unless its finish is on its
+    // way, and then only until its finish window runs out.
+    env.DB.prepare(
+      "UPDATE runs SET status = 'abandoned' WHERE user_id = ? AND status = 'open' AND (id NOT IN (SELECT value FROM json_each(?)) OR superseded_at <= ?)",
+    ).bind(user.id, JSON.stringify(after), now - FINISH_WINDOW_MS),
+    env.DB.prepare("UPDATE runs SET superseded_at = ? WHERE user_id = ? AND status = 'open' AND superseded_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(
+      now,
       user.id,
       JSON.stringify(after),
     ),
@@ -98,7 +106,8 @@ export async function startRun(request: Request, env: Env): Promise<Response> {
 /** The player's run, open or not. */
 async function playersRun(env: Env, user: User, id: string): Promise<RunRow> {
   const run = await env.DB.prepare(
-    `SELECT id, user_id, status, protocol, seed, mobile, after_crash, fast, multiplier, sim_version, started_at, steps, inputs, beats, last_seq, last_upload, receipt
+    `SELECT id, user_id, status, protocol, seed, mobile, after_crash, fast, multiplier, sim_version, started_at, steps, inputs, beats, last_seq, last_upload, receipt,
+            superseded_at
      FROM runs WHERE id = ?`,
   )
     .bind(id)
@@ -137,11 +146,13 @@ function checkOpen(run: RunRow, now: number): void {
   // Runs started before the protocol changed can't be finished by this server.
   if (run.protocol !== RUN_PROTOCOL) throw new HttpError(409, OUTDATED);
   if (now - run.started_at > RUN_TTL_MS) throw new HttpError(410, 'run expired');
+  if (run.superseded_at !== null && now - run.superseded_at > FINISH_WINDOW_MS) throw new HttpError(410, 'run expired');
 }
 
 /**
  * Adds an upload's steps and input chunk to the run, with a beat at the server's clock. A paused
- * run takes only its resume, at the step it paused on; steps never go backwards.
+ * run takes only its resume, at the step it paused on; steps never go backwards. A run a later one
+ * superseded was over by then, so its beats are clocked no later: playing on fails the timing check.
  */
 function extend(run: RunRow, up: Upload, now: number): { steps: number; inputs: number[]; beats: Beat[] } {
   const beats = JSON.parse(run.beats) as Beat[];
@@ -152,7 +163,7 @@ function extend(run: RunRow, up: Upload, now: number): { steps: number; inputs: 
   if (!paused && up.kind === 'resume') throw new HttpError(400, 'resume without a pause');
   if (paused && up.steps !== run.steps) throw new HttpError(400, 'steps moved during a pause');
   if (up.steps < run.steps) throw new HttpError(400, 'steps must not go backwards');
-  beats.push([now, up.steps, up.kind]);
+  beats.push([run.superseded_at === null ? now : Math.min(now, run.superseded_at), up.steps, up.kind]);
   return { steps: up.steps, inputs: (JSON.parse(run.inputs) as number[]).concat(up.inputs), beats };
 }
 
