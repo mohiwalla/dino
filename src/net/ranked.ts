@@ -1,7 +1,8 @@
 // Ranked play: signs the player's runs up with the leaderboard server, records their input,
 // streams it up while they play, and turns the server's verdict into what the HUD shows.
 //
-// Every run asks the server for an obstacle seed the moment it starts. The seed has to arrive
+// Every run asks the server for an obstacle seed the moment it starts, even while the last run's
+// finish is still on its way (the start names that run, so the server leaves it open). The seed has to arrive
 // before the first obstacle spawns (STEPS.CLEAR, 1.2 s in); a run that started without one just
 // isn't ranked. While a ranked run is going the browser uploads a tick every BEAT_MS, and one on
 // each pause and resume, so the server can hold the step count against its own clock
@@ -100,11 +101,11 @@ export function createRanked(opts: RankedOptions): Ranked {
   let lastRunRanked = false;
   /** The server said this tab's game is out of date (it was updated since the page loaded). */
   let outdated = false;
-  /**
-   * The last finish upload; the next run's start waits for it, so it can't abandon that run. Only
-   * the upload: the board refresh after it would hold up the next run's seed past STEPS.CLEAR.
-   */
-  let finishing: Promise<unknown> = Promise.resolve();
+  /** Runs whose finish is on its way, oldest first: a start names them, so the server doesn't abandon them. */
+  const finishing = new Set<string>();
+  /** Numbers finished runs, and the latest whose verdict was shown: an older verdict arriving after it only refreshes the board. */
+  let finishes = 0;
+  let shownFinish = 0;
   /** Counts refresh() calls: only the latest to start may show what it got, as the next run no longer waits for one. */
   let refreshes = 0;
   /** The player's rank on the all-time board, from the latest verdict or board load (a rank up is told from it). */
@@ -186,16 +187,24 @@ export function createRanked(opts: RankedOptions): Ranked {
     r.outbox.push(kind, r.recorder.steps, r.recorder.take(), kind === 'finish' ? opts.look() : undefined);
   }
 
-  /** Sends the run's finish; resolves once the server has it, while shown() goes on to refresh the board. */
-  function finish(r: Run): Promise<unknown> {
+  /** Sends the run's finish, then shows the verdict. */
+  function finish(r: Run): void {
+    const id = r.id!;
     /** Where the player stood before this run, to tell a rank up. */
     const before = knownRank;
     note = 'CHECKING RUN';
     publish();
     upload(r, 'finish');
-    const result = r.outbox.finished();
-    void result.then((verdict) => shown(verdict, before));
-    return result;
+    finishing.add(id);
+    const n = ++finishes;
+    void r.outbox.finished().then((verdict) => {
+      finishing.delete(id);
+      if (n > shownFinish) {
+        shownFinish = n;
+        return shown(verdict, before);
+      }
+      return refresh();
+    });
   }
 
   /** Shows the server's verdict on a finished run, and the board with it. */
@@ -233,8 +242,8 @@ export function createRanked(opts: RankedOptions): Ranked {
       unranked(r, '');
       return;
     }
-    finishing
-      .then(() => api.startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: STALE ? SIM_VERSION - 1 : SIM_VERSION, protocol: RUN_PROTOCOL }))
+    api
+      .startRun({ mobile: opts.mobile, afterCrash, multiplier, simVersion: STALE ? SIM_VERSION - 1 : SIM_VERSION, protocol: RUN_PROTOCOL, after: [...finishing].slice(-2) })
       .then(({ id, seed }) => {
         if (r.state !== 'starting') return;
         const sim = opts.sim();
@@ -291,7 +300,7 @@ export function createRanked(opts: RankedOptions): Ranked {
         live = '';
         // A microtask later, once this frame has shown the crash and picked its clip, line and move.
         const r = run;
-        if (ranked) finishing = Promise.resolve().then(() => finish(r));
+        if (ranked) void Promise.resolve().then(() => finish(r));
         else publish();
       }
       // Obstacles are due and the seed isn't here: the run can't count, so say so now, not when (or if) it turns up.

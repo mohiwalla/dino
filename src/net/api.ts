@@ -90,7 +90,7 @@ async function call<T>(path: string, body?: unknown, timeoutMs?: number): Promis
 export const api = {
   me: () => call<{ user: Account | null }>('me').then((r) => r.user),
   leaderboard: () => call<BoardData>('leaderboard'),
-  startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number; protocol: number }) => call<{ id: string; seed: number }>('runs', body),
+  startRun: (body: { mobile: boolean; afterCrash: boolean; multiplier: number; simVersion: number; protocol: number; after: string[] }) => call<{ id: string; seed: number }>('runs', body),
   /** A tick, pause or resume: {seq, kind, steps, inputs}. */
   beat: (id: string, upload: Upload) => call<{ ok: true }>(`runs/${id}/beat`, upload, UPLOAD_TIMEOUT_MS),
   /** The finish: {seq, kind: 'finish', steps, inputs, look}. */
