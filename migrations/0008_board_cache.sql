@@ -9,3 +9,7 @@ CREATE TABLE board (
   data TEXT
 );
 INSERT INTO board (id, version, built, week_start) VALUES (1, 1, 0, 0);
+
+-- A player's best run in one step (worker/runs.ts bestScore), and whether a finished run is their
+-- best this week without reading all their runs (finishRun).
+CREATE INDEX runs_best ON runs (user_id, status, hidden, score DESC, finished_at);

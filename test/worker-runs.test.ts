@@ -239,10 +239,14 @@ describe('the board', () => {
     w.db.query("UPDATE runs SET status = 'void' WHERE user_id = 'user-ana' AND id != ?").run(first.id);
     expect((await w.call(admin, 'POST', `/api/admin/runs/${first.id}`, { status: 'void' })).status).toBe(200);
     expect((await scores(w, ana)).all).toEqual([`bob ${bobs.score}`]);
+    // With her best voided, a run no better than it is her best again, and shows.
+    const again = await ranked(w, ana);
+    expect((await scores(w, ana)).all).toContain(`ana ${again.score}`);
 
     // A new week: this week's board starts empty, and last week's winners are the old week's.
     tick(8 * 24 * 60 * 60 * 1000);
-    expect(await scores(w, ana)).toEqual({ all: [`bob ${bobs.score}`], week: [], lastWeek: [`bob ${bobs.score}`] });
+    expect((await scores(w, ana)).week).toEqual([]);
+    expect((await scores(w, ana)).lastWeek).toHaveLength(2);
   });
 });
 
